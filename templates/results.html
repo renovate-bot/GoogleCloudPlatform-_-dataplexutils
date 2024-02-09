@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <!-- Import Materialize CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <style>
+        .product-entry {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            border: 1px solid #ddd; /* Add a light frame around each entry */
+            padding: 10px;
+            border-radius: 20px;
+            overflow-wrap: break-word; /* Breaks the word at the end of the line */
+            word-wrap: break-word;
+        }
+
+        .product-image {
+            flex: 50px 50px 150px;
+            margin-right: 20px;
+        }
+
+        .product-details {
+        flex: 1;
+        word-wrap: break-word; /* Breaks the word at the end of the line */
+        overflow-wrap: break-word; /* Breaks the word at the end of the line */
+ 
+        }
+
+        .bold-text {
+        font-weight: bold; /* Make the text bold */
+        word-break: break-all; /* Breaks the word at the end of the line */
+        }
+
+        .type-subtype {
+            display: flex; /* Put the type and subtype in the same line */
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Search Results</h1>
+        {% for result in results %}
+        <div class="product-entry">
+            <div class="product-image">
+                <img src="{{ result.image_url }}" >
+            </div>
+            <div class="product-details">
+                <div class="type-subtype">
+                    <p class="bold-text">{{result.searchResultType}}    {{result.searchResultSubtype}}</p>
+                </div>
+                <h5>{{ result.fullyQualifiedName }}</h5>
+                <p>{{result.relativeResourceName}}</p>
+                <a href="{{ url_for('details', entry_id=result.linkedResource) }}">View Details</a>
+            </div>
+        </div>
+        {% endfor %}
+        <a href="{{ url_for('home') }}">Back to Search</a>
+    </div>
+
+    <!-- Import Materialize JavaScript -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+</body>
+
+</html> 

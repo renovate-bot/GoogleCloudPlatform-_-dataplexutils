@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <!-- Import Materialize CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+</head>
+<body>
+    <div class="container">
+        <h2>{{ result.fullyQualifiedName }}</h2>
+        <p>{{ result.relativeResourceName }}</p>
+        <p>Entry Type: {{ result.type }}</p>
+        <p>Entry Subtype: {{ result.subtype }}</p>
+        <p>Entry ID: {{ result.linkedResource }}</p>
+
+        <div class="content-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for detail in details %}
+                    <tr>
+                        <td>{{ detail.query }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="flex-container">
+            <div class="table-container">
+
+                <table style="width: 50%; margin-left: 0;">
+                    <thead>
+                        <tr>
+                            <th>Column</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for column in result.schema.columns %}
+                        <tr>
+                            <td>{{ column.column }}</td>
+                            <td>{{ column.type }}</td>
+                            <td>{{ column.description }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="content-container">
+                New Contents text
+            </div>
+        </div>
+        <a href="{{ url_for('home') }}">Back to Search</a>
+    </div>
+       
+
+    <!-- Import Materialize JavaScript -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+</body>
+</html>
