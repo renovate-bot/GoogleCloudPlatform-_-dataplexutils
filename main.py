@@ -30,7 +30,8 @@ def generate():
     additional_info=get_dependencies_info(result['fullyQualifiedName'])
     profile_info=_get_table_profile(result['fullyQualifiedName'])
     return render_template('generate.html', result=result,details=additional_info,profile=profile)
-
+ 
+ 
 
 if __name__ == '__main__': 
     app.run(debug=True)
