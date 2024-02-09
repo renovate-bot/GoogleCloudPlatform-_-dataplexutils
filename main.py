@@ -32,5 +32,5 @@ def generate():
     return render_template('generate.html', result=result,details=additional_info,profile=profile)
 
 
-if __name__ == '__main__':
+if __name__ == '__main__': 
     app.run(debug=True)
