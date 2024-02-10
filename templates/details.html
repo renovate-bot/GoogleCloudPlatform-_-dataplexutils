@@ -51,6 +51,8 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                <p>Entry_id:{{entry_id}}</p>
+                <a href="{{ url_for('generate', entry_id=result.linkedResource) }}" class="btn">Generate</a>
             </div>
             <div class="content-container">
                 New Contents text

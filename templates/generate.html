@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate</title>
+</head>
+<body>
+    <h1>{{ result.fullyQualifiedName }}</h1>
+    <p>{{ result.description }}</p>
+
+    <h2>Field Descriptions</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for field in details %}
+            <tr>
+                <td>{{ field.name }}</td>
+                <td>{{ field.description }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Images</h2>
+    {% for field in details %}
+    <div>
+        <h3>{{ field.name }}</h3>
+        <img src="{{ field.formula_image_url }}" alt="{{ field.name }} formula">
+    </div>
+    {% endfor %}
+    {{generated_description}}
+    {{profile_info}}
+</body>
+</html>

@@ -4,6 +4,13 @@ from google.protobuf.json_format import MessageToJson
 from google.cloud import dataplex_v1 #import lineage_v1
 from google.cloud import datacatalog_lineage_v1 as lineage_v1
 from google.cloud import bigquery
+import time
+from vertexai.preview.generative_models import (
+    GenerationConfig,
+    GenerativeModel,
+    Image,
+    Part,
+)
 
 
 def lineage_source_tables(target_fqdn):
@@ -170,11 +177,12 @@ def _get_single_data_scanname(tableref):
     response=dplx_client.list_data_scans(parent="projects/jsk-dataplex-demo-380508/locations/us-central1")
     #print(response)
     for element in response:
-        print("START HERE---->\n"+str(element))
+        print("START HERE---->\n")
         
-        print(element.data.resource)
+        #print(element.data.resource)
         print("element resource name:"+element.data.resource)
         print("string position:"+str(str(element.data.resource).find(tableref)))
+        print("tableref:"+tableref)
         if str(element.data.resource).find(tableref) > -1:
             
             print("FOUND at ->"+str(str(element.data.resource).find(tableref))+"\n element name:"+element.name)
@@ -187,7 +195,7 @@ def _get_single_data_scanname(tableref):
 
 def _get_table_profile(tablename):
         dplx_client=dataplex_v1.DataScanServiceClient()
-  
+        print('get_table_profile: looking for profile for table:'+tablename)
         scanname=_get_single_data_scanname(tablename)
 
 
@@ -260,14 +268,34 @@ def get_dependencies_info(tablename):
                 
 
 def _get_prompt(tablename,profile,sql_queries):
+    queries=""
+    for i in sql_queries:
+        queries=queries+i.query+";"
+
     contents="You are a data steward. Your role is to produce human meaningful metadata descriptions.\
     Table's fully qualified "+tablename+" \
     These SQL queries can be used to generate the data in table \
-    "+ sql_queries+"\
+    "+ queries +"\
     This is table profile information "+profile+"\
     Provide  description of table contents and usage. \
     Provide description of each column with top common values and their explanation. \
     Provide pseudocode expressed in SQL to calculate each field formatted in LaTeX.\
     "
+    return contents
 
-    #get_dependencies_info('bigquery:jsk-dataplex-demo-380508.metadata_generation.cc')
+
+def generate_table_description(tablename,profile,sql_queries):
+
+    prompt=_get_prompt(tablename,profile,sql_queries)
+    text_model= GenerativeModel("gemini-ultra")
+    responses = text_model.generate_content(prompt)
+    print("\n-------Response--------")
+    for response in responses:
+        print(response.text, end="")
+    return responses
+
+#get_dependencies_info('bigquery:jsk-dataplex-demo-380508.metadata_generation.cc')
+#3profil=_get_table_profile('//bigquery.googleapis.com/projects/jsk-dataplex-demo-380508/datasets/metadata_generation/tables/ccagg')
+#print(profil)
+#_get_table_profile('bigquery:jsk-dataplex-demo-380508.metadata_generation.ccagg')
+#_get_single_data_scanname("//bigquery.googleapis.com/projects/jsk-dataplex-demo-380508/datasets/metadata_generation/tables/ccagg")
