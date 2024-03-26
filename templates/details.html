@@ -6,61 +6,391 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
 </head>
 <body>
+    <a href="{{ url_for('home') }}">Back to Search</a>
     <div class="container">
-        <h2>{{ result.fullyQualifiedName }}</h2>
-        <p>{{ result.relativeResourceName }}</p>
-        <p>Entry Type: {{ result.type }}</p>
-        <p>Entry Subtype: {{ result.subtype }}</p>
-        <p>Entry ID: {{ result.linkedResource }}</p>
+        <h5><img src="https://www.gstatic.com/cloud/images/navigation/icons.svg#bigquery"></img> {{ result.fullyQualifiedName }}</h5>
+        <!-- FILEPATH: /Users/jskuratowicz/Projects/Metadata Generation/templates/details.html -->
+        <!-- BEGIN: section-separator -->
+        <div style="text-align: center;">
+            <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
+            <span style="font-size: 20px; color: #999;">Table metadata</span>
+            <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
+        </div>
+        <!-- END: section-separator -->
+        
+        
 
+        Additional collected metadata: 
+        </br>
         <div class="content-container">
+            Lineage
+            {% for detail in details %}
+                <div class="tab">Source Query {{ loop.index }}
+                    <div class="popup">
+                        <pre>{{ detail.query }}</pre>
+                    </div>
+                </div>
+            {% endfor %}
+        
+            
+            <div class="tab" id="button_profile">Load Profile
+                <div class="popup" id="Profile">Unknown</div>
+            </div>
+        
+            <script>
+                document.getElementById('button_profile').addEventListener('click', function() {
+                    var genElement = document.getElementById('Profile');
+                    genElement.textContent = "Searching...";
+                    genElement.classList.add("pulsate");
+        
+                    fetch('/getProfile?entry_id={{entry_id}}')
+                        .then(response => response.text())
+                        .then(data => {
+                            genElement.textContent = data;
+                            genElement.classList.remove("pulsate");
+                        });
+                });
+            </script>
+        </div>
+
+        <div style="margin-top: 20px;margin-bottom: 20px;"> Add PDF documentation
+        <form method="post" enctype="multipart/form-data" id="pdfForm">
+            <input type="file" name="file" id="pdfFile">
+            <input type="submit" value="Upload" id="pdfSubmit">
+          </form>
+        </div>
+        
+        <div class="content-container">
+        <script>
+            document.getElementById('pdfForm').addEventListener('submit', function(event) {
+                event.preventDefault(); // Prevent form submission
+
+                var fileInput = document.getElementById('pdfFile');
+                var file = fileInput.files[0];
+
+                var formData = new FormData();
+                formData.append('file', file);
+
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', '/pdf', true);
+                xhr.onload = function() {
+                    if (xhr.status === 200) {
+                        // Handle successful upload
+                        console.log('File uploaded successfully');
+                    } else {
+                        // Handle upload error
+                        console.error('File upload failed');
+                    }
+                };
+                xhr.send(formData);
+            });
+
+        </script>
+
             <table>
+                <style>
+                    table td, table th {
+                        padding: 5px;  /* Adjust as needed */
+                    }
+                    .tab {
+                        display: inline-block;
+                        padding: 3px 4px;
+                        margin: 0 1px;
+                        background-color: #ddd;
+                        border: none;
+                        cursor: pointer;
+                        text-align: center;
+                        transition: background-color 0.3s;
+                    }
+
+                    .tab:hover {
+                        background-color: #bbb;
+                        
+                    }
+                    @keyframes pulse {
+                        0% { opacity: 1; }
+                        50% { opacity: 0.5; }
+                        100% { opacity: 1; }
+                    }
+
+                    .pulsate {
+                        animation: pulse 1s infinite;
+    }
+                </style>
+
                 <thead>
                     <tr>
-                        <th>Details</th>
+                        <th class="first-column">Metadata</th>
+
                     </tr>
                 </thead>
                 <tbody>
-                    {% for detail in details %}
                     <tr>
-                        <td>{{ detail.query }}</td>
+                        <td width="100">
+                            <p>Entry Type</p>
+                        </td>
+
+                        <td width="200">
+                            <p>Entry BQ description</p>
+                        </td>
+                        <td width="50">
+                            
+                        </td>
+                        <td width="300">
+                            <p>Entry Dataplex description</p>
+                        </td>
+                       
                     </tr>
-                    {% endfor %}
+                    <tr>
+                        <td >
+                            <p>{{ result.type }}</p>
+                        
+                        </td>
+
+                        <td >
+                            <p>{{ table_metadata.bq_description }}</p>
+                        </td>
+                        
+
+                       <td>
+
+                        <span id="button_tabdesc" class="tab">Generate</span>
+                       </td>
+                        </td>
+                        <td >
+                            <p>  <div id="tab_description">{{ table_metadata.dataplex_description }}</div></p>
+                        </td>
+                        <script>
+                            document.getElementById('button_tabdesc').addEventListener('click', function() {
+                                var genElement = document.getElementById('tab_description');
+                                genElement.textContent = "Generating...";
+                                genElement.classList.add("pulsate");
+                        
+                                fetch('/generateTableDescription?entry_id={{entry_id}}')
+                                    .then(response => response.text())
+                                    .then(data => {
+                                        genElement.textContent = data;
+                                        genElement.classList.remove("pulsate");
+                                    });
+                            });
+                        </script>
+                       
+
+                    </tr>
                 </tbody>
             </table>
         </div>
 
+        <style>
+            .tab {
+                position: relative;
+                display: inline-block;
+                padding: 10px;
+                border: 1px solid #ccc;
+                cursor: pointer;
+            }
+        
+            .popup {
+                visibility: hidden;
+                position: absolute;
+                max-width: 400px;
+                max-height: 500px; /* Add a max-height if needed */
+                overflow: auto; /* Add this line */
+                background-color: #f9f9f9;
+                border: 1px solid #888;
+                padding: 10px;
+                box-shadow: 0 0 10px rgba(0,0,0,0.2);
+                top: 100%; /* Changed from bottom to top */
+                left: 50%;
+                transform: translateX(-50%);
+                transition: visibility 0.3s;
+            }
+        
+            .tab:hover .popup {
+                visibility: visible;
+            }
+
+    }
+        </style>
+         </br>
+        
+        </br>
+        <div style="text-align: center;">
+            <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
+            <span style="font-size: 20px; color: #999;">Column metadata</span>
+            <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
+        </div>
+
         <div class="flex-container">
             <div class="table-container">
+                <style>
+                    table td, table th {
+                        padding: 5px;  /* Adjust as needed */
+                    }
+                    .tab {
+                        display: inline-block;
+                        padding: 3px 4px;
+                        margin: 0 1px;
+                        background-color: #ddd;
+                        border: none;
+                        cursor: pointer;
+                        text-align: center;
+                        transition: background-color 0.3s;
+                    }
 
-                <table style="width: 50%; margin-left: 0;">
+                    .tab:hover {
+                        background-color: #bbb;
+                        
+                    }
+                    @keyframes pulse {
+                        0% { opacity: 1; }
+                        50% { opacity: 0.5; }
+                        100% { opacity: 1; }
+                    }
+
+                    .pulsate {
+                        animation: pulse 1s infinite;
+                    }
+                    /* Style for unclicked buttons */
+                    .button-term {
+                        background-color: lightblue;
+                        color: white;
+                        border: none;
+                        padding: 5px 10px;
+                        text-align: center;
+                        text-decoration: none;
+                        display: inline-block;
+                        font-size: 16px;
+                        margin: 4px 2px;
+                        cursor: pointer;
+                    }
+
+                    /* Style for clicked buttons */
+                    .button-term.clicked {
+                        background-color: darkblue;
+                    }
+                </style>
+                
+                <table style="width: 90%; margin-left: 0;margin-top: 0;">
                     <thead>
                         <tr>
-                            <th>Column</th>
-                            <th>Type</th>
-                            <th>Description</th>
+                            <th width="50">Column</th>
+                            <th width="50">Type</th>
+                            <th width="100">Description</th>
+                            <th width="100">   </th>
+                            <th width="200">Generated description</th>
+                            <th width="200">Generated calculation formula</th>
+                            <th width="50">   </th>
+                            <th width="50">   </th>
+                            <th width="50"> </th>
+                            <th width="200"> Suggest business glossary terms</th>
                         </tr>
                     </thead>
                     <tbody>
+
                         {% for column in result.schema.columns %}
                         <tr>
                             <td>{{ column.column }}</td>
                             <td>{{ column.type }}</td>
                             <td>{{ column.description }}</td>
+                            <td><span id="button_{{ column.column }}" class="tab">Generate</span></td>
+                            <td><div id="gen_{{ column.column }}"></div></td>
+                            <td><div id="form_{{ column.column }}"></div></td>
+                            <td><span id="button_accept_{{ column.column }}" class="tab">Accept</span></td>                            
+                            <td><div id="accept_{{ column.column }}" ></div></td>
+                            <td><span id="button_suggest_{{ column.column }}" class="tab">Suggest terms</span></td>                    
+                            <td><div id="term_{{ column.column }}" ></span></td>
                         </tr>
                         {% endfor %}
+                        <script>
+                            {% for column in result.schema.columns %}
+                            document.getElementById('button_{{ column.column }}').addEventListener('click', function() {
+                            
+                            var genElement = document.getElementById('gen_{{ column.column }}');
+                            genElement.textContent = "Generating...";
+                            genElement.classList.add("pulsate");
+                            
+                            var formElement = document.getElementById('form_{{ column.column }}');
+                            formElement.textContent = "Generating...";
+                            formElement.classList.add("pulsate");
+        
+                            fetch('/generateColumnDescription?entry_id={{entry_id}}&column={{ column.column }}')
+                                .then(response => response.text())
+                                .then(data => {
+                                    genElement.textContent = data;
+                                    genElement.classList.remove("pulsate");
+                                });
+
+                            fetch('/generateColumnFormula?entry_id={{entry_id}}&column={{ column.column }}')
+                                .then(response => response.text())
+                                .then(data => {
+                                    formElement.textContent = data;
+                                    formElement.classList.remove("pulsate");
+                                });
+                        });
+
+                        document.getElementById('button_accept_{{ column.column }}').addEventListener('click', function() {
+              
+                        var acceptElement = document.getElementById('accept_{{ column.column }}');
+                            acceptElement.textContent = "Saving...";
+                            acceptElement.classList.add("pulsate");
+
+                            fetch('/saveColumnValues?entry_id={{entry_id}}&column={{ column.column }}')
+                                .then(response => response.text())
+                                .then(data => {
+                                    acceptElement.textContent = "Saved";
+                                    acceptElement.classList.remove("pulsate");
+                                });
+                        });
+
+                        document.getElementById('button_suggest_{{ column.column }}').addEventListener('click', function() {
+                        var termElement = document.getElementById('term_{{ column.column }}');
+                        var button = document.getElementById('button_suggest_{{ column.column }}');
+                        termElement.textContent = "Suggesting...";
+                        termElement.classList.add("pulsate");
+
+                        fetch('/generateColumnSuggestedTerms?entry_id={{entry_id}}&column={{ column.column }}')
+                            .then(response => response.json()) // Parse the JSON response
+                            .then(data => {
+                                termElement.textContent = ""; // Clear the existing content
+                                termElement.classList.remove("pulsate");
+
+                                // If there are no terms, hide the button
+                                if (data.terms.length === 0) {
+                                    button.style.display = "none";
+                                } else {
+                                    // Loop over the terms array and create a new button for each term
+                                    data.terms.forEach(term => {
+                                        var termButton = document.createElement("button");
+                                        termButton.textContent = term;
+                                        termButton.className = "button-term";
+                                        termButton.addEventListener('click', function() {
+                                            this.className = "button-term clicked";
+                                        });
+                                        termElement.appendChild(termButton);
+
+                                        
+                                    });
+                                }
+                            })
+                            .catch(error => {
+                                console.error(error); // Log any errors to the console
+                            });
+                    });
+                        {% endfor %}
+                        </script>
                     </tbody>
                 </table>
-                <p>Entry_id:{{entry_id}}</p>
-                <a href="{{ url_for('generate', entry_id=result.linkedResource) }}" class="btn">Generate</a>
-            </div>
-            <div class="content-container">
-                New Contents text
-            </div>
+ </div>
+
+        </div>
+        <div style="text-align: center;">
+            <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
+            <span style="font-size: 20px; color: #999;">Business glossary</span>
+            <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
         </div>
         <a href="{{ url_for('home') }}">Back to Search</a>
     </div>
-       
 
     <!-- Import Materialize JavaScript -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>

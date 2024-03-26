@@ -9,7 +9,7 @@ from PIL import Image
 
 
 app = Flask(__name__)
-aiplatform.init(project='argon-zoo-413112', location='us-central1')
+aiplatform.init(project='cloud-llm-preview1', location='us-central1')
 
 def pdf_to_images(base64_pdf):
     # Decode the base64 PDF

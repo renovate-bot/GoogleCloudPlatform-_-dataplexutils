@@ -6,12 +6,13 @@
 </head>
 <body>
     <div class="container">
-        <h1>Metadata Steward</h1>
+        
+        <h1><img src="static/wizard.png" alt="Logo" style="width: 100px; height: 100px;">Metadata Wizard</h1>
+        
         <form action="{{ url_for('home') }}" method="post">
             <div class="input-field">
                 <input id="search" name="search" type="search" required>
-                <label class="label-icon" for="search"><i class="material-icons">search</i></label>
-                <i class="material-icons">close</i>
+                <label class="label-icon" for="search"></label>
             </div>
             <button type="submit" class="btn">Search</button>
         </form>

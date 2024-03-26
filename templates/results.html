@@ -47,11 +47,8 @@
                 <img src="{{ result.image_url }}" >
             </div>
             <div class="product-details">
-                <div class="type-subtype">
-                    <p class="bold-text">{{result.searchResultType}}    {{result.searchResultSubtype}}</p>
-                </div>
                 <h5>{{ result.fullyQualifiedName }}</h5>
-                <p>{{result.relativeResourceName}}</p>
+                
                 <a href="{{ url_for('details', entry_id=result.linkedResource) }}">View Details</a>
             </div>
         </div>
