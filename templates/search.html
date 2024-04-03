@@ -1,24 +1,28 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <!-- Import Materialize CSS -->
+    <title>Metadata Wizard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
-</head>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">  </head>
 <body>
-    <div class="container">
-        
-        <h1><img src="static/wizard.png" alt="Logo" style="width: 100px; height: 100px;">Metadata Wizard</h1>
-        
-        <form action="{{ url_for('home') }}" method="post">
-            <div class="input-field">
-                <input id="search" name="search" type="search" required>
-                <label class="label-icon" for="search"></label>
+    <div class="container center-align">
+        <div class="row">
+            <div class="col s12 m6 offset-m3">
+                <img src="static/wizard.png" alt="Logo" class="responsive-img circle" style="width: 100px; height: 100px;">
+                <h1>Metadata Wizard</h1>
+
+                <form action="{{ url_for('home') }}" method="post">
+                    <div class="input-field">
+                        <i class="material-icons prefix">search</i>
+                        <input id="search" name="search" type="search" required>
+                        <label for="search">Search Metadata</label>
+                    </div>
+                    <button type="submit" class="btn waves-effect waves-light">Search</button>
+                </form>
             </div>
-            <button type="submit" class="btn">Search</button>
-        </form>
+        </div>
     </div>
 
-    <!-- Import Materialize JavaScript -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 </body>
 </html>

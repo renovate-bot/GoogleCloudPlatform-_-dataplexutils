@@ -9,7 +9,7 @@ from PIL import Image
 
 
 app = Flask(__name__)
-aiplatform.init(project='cloud-llm-preview1', location='us-central1')
+aiplatform.init(project='jsk-dataplex-demo-380508', location='us-central1')
 
 def pdf_to_images(base64_pdf):
     # Decode the base64 PDF
@@ -64,7 +64,8 @@ def query_gemini(base64_image):
     
     # Generate content based on the image
     responses = model.generate_content(
-        [image_part, "Interpret this document. If detected, report back the table schema and some sample queries. Structure your answer in JSON format"],
+        #[ "Interpret this document. If detected, report back the table schema and some sample queries. Structure your answer in JSON format",image_part],
+        [ "Interpret this document",image_part],
         generation_config={
             "max_output_tokens": 2048,
             "temperature": 0.4,

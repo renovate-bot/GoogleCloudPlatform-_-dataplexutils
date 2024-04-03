@@ -1,10 +1,12 @@
 from flask import Flask, request, render_template, jsonify
-from  metadata.metadata import suggest_column_glossary_terms,pdf_to_images,combine_images,query_gemini,generate_column_formula,extract_metadata,generate_column_description,_search_data_catalog,_get_entry_details,get_dependencies_info,_get_table_profile,generate_table_description
+from  metadata.metadata import get_policy_tags_for_columns,generate_column_lineage,suggest_column_glossary_terms,pdf_to_images,combine_images,generate_column_formula,extract_metadata,generate_column_description,_search_data_catalog,_get_entry_details,get_dependencies_info,_get_table_profile,generate_table_description
 from flask_caching import Cache
+
 #from pdf_ai_flask.pdf import pdf_to_images,combine_images,query_gemini
 import base64
 import io
 from PIL import Image
+
 
 
 app = Flask(__name__)
@@ -16,6 +18,12 @@ config = {
 app.config.from_mapping(config)
 
 cache = Cache(app)
+
+# Global dictionary available to all methods
+global_dict = {}
+
+
+
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -47,6 +55,7 @@ def generate():
     print("generate():result['fullyQualifiedName']:",result['fullyQualifiedName'])
     additional_info=get_dependencies_info(result['fullyQualifiedName'])
     profile_info=_get_table_profile(entry_id)
+
     generated_description=generate_table_description(tablename=result['fullyQualifiedName'],profile=profile_info,\
                                                      sql_queries=additional_info)
 
@@ -56,13 +65,12 @@ def generate():
 @app.route('/generateTableDescription/', methods=['GET','POST'])
 def generateTableDescription():
     entry_id = request.args.get('entry_id')
-
     result = _get_entry_details(entry_id)  # Replace this with your function to get a result by ID
     print("generate():result['fullyQualifiedName']:",result['fullyQualifiedName'])
     additional_info=get_dependencies_info(result['fullyQualifiedName'])
     profile_info=_get_table_profile(entry_id)
     generated_description=generate_table_description(tablename=result['fullyQualifiedName'],profile=profile_info,\
-                                                     sql_queries=additional_info)
+                                                    sql_queries=additional_info,pdf=global_dict.popitem()[1] if global_dict else None)
 
     return generated_description
 
@@ -108,12 +116,33 @@ def generateColumnFormula():
     generated_formula=generate_column_formula(tablename=result['fullyQualifiedName'],column=column_name,profile=profile_info,\
                                                      sql_queries=additional_info)
     return generated_formula
+
+@app.route('/generateColumnLineage/', methods=['GET','POST'])
+def generateColumnLineage():
+    entry_id = request.args.get('entry_id')
+    column_name = request.args.get('column')
+    print("generateColumnLineage():entry_id:",entry_id)
+    print("generateColumnLineage():column:",column_name)
+    result = _get_entry_details(entry_id)  # Replace this with your function to get a result by ID
+    print("generate():result['fullyQualifiedName']:",result['fullyQualifiedName'])
+    additional_info=get_dependencies_info(result['fullyQualifiedName'])
+    profile_info=_get_table_profile(entry_id)
+    generated_lineage=generate_column_lineage(column=column_name,tablename=result['fullyQualifiedName'],profile=profile_info,\
+                                                     sql_queries=additional_info)
+    return generated_lineage
  
 @app.route('/getProfile/', methods=['GET','POST'])
 def getProfile():
     entry_id = request.args.get('entry_id')
     profile_info=_get_table_profile(entry_id)
     return profile_info
+
+@app.route('/getPolicyTags/', methods=['GET','POST'])
+def getPolicyTags():
+    column_id = request.args.get('column')
+    build_json=get_policy_tags_for_columns(column_id)
+    return build_json
+
 
 @app.route('/pdf', methods=['GET', 'POST'])
 def upload_file():
@@ -129,14 +158,15 @@ def upload_file():
             
             # Combine images into one
             base64_combined_image = combine_images(base64_images)
-            
+            global_dict[file.filename] = base64_combined_image
+            return "Loaded succesfully"
             # Process the combined image with Gemini
-            response = query_gemini(base64_combined_image)
-            
-            # Return the Gemini response
-            return jsonify({"response": response})
-        else:
-            return 'Invalid file format. Please upload a PDF file.'
+     #       response = query_gemini(base64_combined_image)
+    #        
+    #        # Return the Gemini response
+   
+    #    else:
+    #        return 'Invalid file format. Please upload a PDF file.'
         
 
 if __name__ == '__main__': 

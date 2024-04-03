@@ -165,11 +165,20 @@
                                 var genElement = document.getElementById('tab_description');
                                 genElement.textContent = "Generating...";
                                 genElement.classList.add("pulsate");
-                        
+
                                 fetch('/generateTableDescription?entry_id={{entry_id}}')
                                     .then(response => response.text())
                                     .then(data => {
-                                        genElement.textContent = data;
+                                        // Remove "Description" tag
+                                        data = data.replace("**Description:**", "");
+                                        data = data.replace("**Description**", "");
+
+                                        // Remove "Source" tag
+                                        data = data.replace("**Source:**", "<br><br>");
+                                        data = data.replace("**Source**", "<br><br>");
+
+
+                                        genElement.innerHTML = data;
                                         genElement.classList.remove("pulsate");
                                     });
                             });
@@ -217,7 +226,7 @@
         </br>
         <div style="text-align: center;">
             <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
-            <span style="font-size: 20px; color: #999;">Column metadata</span>
+            <span style="font-size: 20px; color: #999;">Column business metadata</span>
             <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
         </div>
 
@@ -271,7 +280,7 @@
                     }
                 </style>
                 
-                <table style="width: 90%; margin-left: 0;margin-top: 0;">
+                <table style="width: 100%; margin-left: 0;margin-top: 0;">
                     <thead>
                         <tr>
                             <th width="50">Column</th>
@@ -386,12 +395,135 @@
         </div>
         <div style="text-align: center;">
             <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
-            <span style="font-size: 20px; color: #999;">Business glossary</span>
+            <span style="font-size: 20px; color: #999;">Column technical metadata</span>
             <hr style="border: none; border-top: 1px dashed #ccc; height: 1px; width: 50%; margin: 20px auto;">
         </div>
+        <table style="width: 100%; margin-left: 0;margin-top: 0;">
+            <thead>
+                <tr>
+                    <th width="50">Column</th>
+                    <th width="50">Type</th>
+                    <th width="50">Generate column lineage</th>
+                    <th width="50">Source columns</th>
+                    <th width="200">Source policy tags</th>
+                    <th width="200">Existing policy tags</th>
+                    <th width="100">   </th>
+                    <th width="100">   </th>
+                    <th width="200" ></th>
+                    <th width="200"> </th>
+
+
+                </tr>
+            </thead>
+            <tbody>
+
+                {% for column in result.schema.columns %}
+                <tr>
+                    <td>{{ column.column }}</td>
+                    <td>{{ column.type }}</td>
+                    <td><span id="button_tech_{{ column.column }}" class="tab">Generate</span></td>
+                    <td><div id="lineage_{{ column.column }}"></div></td>
+                    <td><div id="policy_tags_lineage_{{ column.column }}"></div></td>
+                    <td><div id="new_policy_tags_lineage_{{ column.column }}"></div></td>
+                    <td><span id="tags_button_accept_{{ column.column }}" class="tab">Accept</span> </td>                            
+                    <td></td>
+                    <td><div id="tag_button_accept_output{{ column.column }}"></div></td>                  
+                    <td></td>
+                </tr>
+                <script>
+
+                document.getElementById('tags_button_accept_{{ column.column }}').addEventListener('click', function() {
+                            
+                            var acceptElement = document.getElementById('tag_button_accept_output{{ column.column }}');
+                                acceptElement.textContent = "Saving...";
+                                acceptElement.classList.add("pulsate");
+
+                                fetch('/saveColumnValues?entry_id={{entry_id}}&column={{ column.column }}')
+                                    .then(response => response.text())
+                                    .then(data => {
+                                        acceptElement.textContent = "Saved";
+                                        acceptElement.classList.remove("pulsate");
+                                    });
+                            });
+
+                document.getElementById('button_tech_{{ column.column }}').addEventListener('click', function() {
+                    var genElement = document.getElementById('lineage_{{ column.column }}');
+                    var genLineageElement = document.getElementById('policy_tags_lineage_{{ column.column }}');
+                    var newGenLineageElement = document.getElementById('new_policy_tags_lineage_{{ column.column }}');
+                    
+
+                    genElement.textContent = "Generating...";
+                    genElement.classList.add("pulsate");
+
+                    fetch('/generateColumnLineage?entry_id={{entry_id}}&column={{ column.column }}')
+                        .then(response => response.text())
+                        .then(data => {
+                            genElement.textContent = "";
+                            genElement.classList.remove("pulsate");
+
+                            // Parse the JSON string to get the columns array
+                            const parsedData = JSON.parse(data);
+                            const columns = parsedData.columns;
+
+                            // Loop over the columns array and create a new button for each value
+                            columns.forEach(column => {
+                                const columnButton = document.createElement("button");
+                                columnButton.textContent = column;
+                                columnButton.className = "button-column";
+                                columnButton.style.borderRadius = "50px"; // Make the button pillow-shaped
+                                columnButton.style.backgroundColor = "lightblue"; // Set the background color to light blue
+                                columnButton.style.fontSize = "12px"; // Set the font size to smaller
+                                columnButton.addEventListener('click', function() {
+                                    this.className = "button-column clicked";
+                                    
+                                });
+                                genElement.appendChild(columnButton);
+
+                            });
+
+                            // Call another fetch when the output is received
+                            fetch('/getPolicyTags?column=' + data)
+                                .then(response => response.text())
+                                .then(anotherData => {
+                                    //genLineageElement.textContent = anotherData; // Handle the response from the second fetch
+                                    console.log(anotherData);
+
+                                    // Parse the JSON string to get the tag_name value
+                                    const parsedData = JSON.parse(anotherData);
+                                    const tagName = parsedData.tag_name;
+                                    const columnName = parsedData.column;
+
+                                    // Create a button for the tag_name value
+                                    const tagButton = document.createElement("button");
+                                    tagButton.textContent = tagName;
+                                    tagButton.addEventListener('click', function() {
+                                        this.className = "button-tag clicked";
+                                        newGenLineageElement.appendChild(this.cloneNode(true)); // Append a copy of the clicked button to newGenLineageElement
+                                        newGenLineageElement.lastChild.style.backgroundColor = "white"; // Set the background color of the newly created button to white
+                                    });
+                                    tagButton.className = "button-tag";
+                                    tagButton.style.borderRadius = "50px"; // Make the button pillow-shaped
+                                    tagButton.style.backgroundColor = "lightblue"; // Set the background color to light blue
+                                    tagButton.style.fontSize = "12px"; // Set the font size to smaller
+                                    tagButton.addEventListener('click', function() {
+                                        this.className = "button-tag clicked";
+                                    });
+                                    //genLineageElement.textContent = columnName;
+                                    genLineageElement.appendChild(tagButton);
+                                })
+                                .catch(error => {
+                                    console.error(error);
+                                });
+                        });
+                });
+                </script>
+                {% endfor %}
+                
+            </tbody>
+        </table>
         <a href="{{ url_for('home') }}">Back to Search</a>
     </div>
-
+    
     <!-- Import Materialize JavaScript -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 </body>

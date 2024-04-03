@@ -4,37 +4,64 @@
     <!-- Import Materialize CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <style>
+        body {
+            background-color: #f5f5f5; /* Set a light gray background color for the body */
+        }
+
+        .container {
+            max-width: 800px; /* Limit the width of the container */
+            margin: 0 auto; /* Center the container horizontally */
+            padding: 20px; /* Add some padding around the container */
+        }
+
         .product-entry {
             display: flex;
             align-items: center;
             margin-bottom: 20px;
             border: 1px solid #ddd; /* Add a light frame around each entry */
             padding: 10px;
-            border-radius: 20px;
-            overflow-wrap: break-word; /* Breaks the word at the end of the line */
-            word-wrap: break-word;
+            border-radius: 5px; /* Add a slight border radius */
+            background-color: white; /* Set the background color to white */
+            cursor: pointer; /* Add cursor pointer to indicate it's clickable */
+            transition: background-color 0.3s ease; /* Add a smooth transition effect */
+        }
+
+        .product-entry:hover {
+            background-color: #f5f5f5; /* Change the background color on hover */
         }
 
         .product-image {
-            flex: 50px 50px 150px;
-            margin-right: 20px;
+            flex: 0 0 150px; /* Set a fixed width for the image */
+            margin-right: 10px; /* Add some spacing between the image and details */
         }
 
         .product-details {
-        flex: 1;
-        word-wrap: break-word; /* Breaks the word at the end of the line */
-        overflow-wrap: break-word; /* Breaks the word at the end of the line */
- 
+            flex: 1;
         }
 
-        .bold-text {
-        font-weight: bold; /* Make the text bold */
-        word-break: break-all; /* Breaks the word at the end of the line */
+        .product-details h5 {
+            margin: 0; /* Remove the default margin for the heading */
+            font-size: 18px; /* Increase the font size */
+            font-weight: bold; /* Make the text bold */
+            color: #333; /* Set a dark gray color for the text */
         }
 
         .type-subtype {
             display: flex; /* Put the type and subtype in the same line */
             justify-content: space-between;
+            margin-top: 10px; /* Add some spacing at the top */
+            color: #777; /* Set a light gray color for the text */
+        }
+
+        .back-link {
+            display: block; /* Make the link a block element */
+            margin-top: 20px; /* Add some spacing at the top */
+            color: #333; /* Set a dark gray color for the link */
+            text-decoration: none; /* Remove the underline */
+        }
+
+        .back-link:hover {
+            text-decoration: underline; /* Add underline on hover */
         }
     </style>
 </head>
@@ -42,22 +69,31 @@
     <div class="container">
         <h1>Search Results</h1>
         {% for result in results %}
-        <div class="product-entry">
+        <div class="product-entry" onclick="window.location.href = '{{ url_for('details', entry_id=result.linkedResource) }}'">
             <div class="product-image">
                 <img src="{{ result.image_url }}" >
             </div>
             <div class="product-details">
-                <h5>{{ result.fullyQualifiedName }}</h5>
-                
-                <a href="{{ url_for('details', entry_id=result.linkedResource) }}">View Details</a>
+                <h5 id="name_{{ loop.index }}">{{ result.fullyQualifiedName }}</h5> <div class="type-subtype">
+                    <span>{{ result.type }}</span>
+                    <span>{{ result.subtype }}</span>
+                </div>
             </div>
         </div>
+        <script>
+            // Get the element with the ID corresponding to this loop iteration
+            var nameElement = document.getElementById("name_{{ loop.index }}");
+            // Split the text content by ":" and take the part after it
+            var newName = nameElement.textContent.split(":").slice(1).join(":");
+            // Update the element's text content
+            nameElement.textContent = newName;
+        </script>
         {% endfor %}
-        <a href="{{ url_for('home') }}">Back to Search</a>
+        <a href="{{ url_for('home') }}" class="back-link">Back to Search</a>
     </div>
     
     <!-- Import Materialize JavaScript -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
 </body>
 
-</html> 
+</html>
