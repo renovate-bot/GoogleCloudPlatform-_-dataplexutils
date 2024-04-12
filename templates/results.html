@@ -4,14 +4,23 @@
     <!-- Import Materialize CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <style>
+                
+            body {
+                background-image: url("../static/wonder.jpg");
+                background-repeat: no-repeat;
+                background-position: calc(100% + 100px) calc(120% + 1px);
+                background-size: 400px;
+            }
+    
         body {
-            background-color: #f5f5f5; /* Set a light gray background color for the body */
+            background-color: white; /* Set the background color to white */
         }
 
         .container {
             max-width: 800px; /* Limit the width of the container */
             margin: 0 auto; /* Center the container horizontally */
             padding: 20px; /* Add some padding around the container */
+            font-family: 'Google Sans', sans-serif;
         }
 
         .product-entry {
@@ -21,13 +30,14 @@
             border: 1px solid #ddd; /* Add a light frame around each entry */
             padding: 10px;
             border-radius: 5px; /* Add a slight border radius */
-            background-color: white; /* Set the background color to white */
+            background-color: #f5f5f5; /* Set the background color to light gray */
             cursor: pointer; /* Add cursor pointer to indicate it's clickable */
             transition: background-color 0.3s ease; /* Add a smooth transition effect */
+            font-family: 'Google Sans', sans-serif;
         }
 
         .product-entry:hover {
-            background-color: #f5f5f5; /* Change the background color on hover */
+            background-color: #e0e0e0; /* Change the background color on hover */
         }
 
         .product-image {

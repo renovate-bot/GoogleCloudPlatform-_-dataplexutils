@@ -3,13 +3,20 @@
 <head>
     <title>Metadata Wizard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">  </head>
+    <link href="https://fonts.googleapis.com/css?family=Google+Sans&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Google Sans', sans-serif;
+        }
+    </style>
+</head>
 <body>
     <div class="container center-align">
         <div class="row">
             <div class="col s12 m6 offset-m3">
                 <img src="static/wizard.png" alt="Logo" class="responsive-img circle" style="width: 100px; height: 100px;">
-                <h1>Metadata Wizard</h1>
+                <h1 style="font-weight: bold;">Metadata Wizard</h1>
 
                 <form action="{{ url_for('home') }}" method="post">
                     <div class="input-field">
