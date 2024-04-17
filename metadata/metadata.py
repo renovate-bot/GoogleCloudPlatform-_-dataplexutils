@@ -324,7 +324,7 @@ def _get_single_data_scanname(tableref):
     response=dplx_client.list_data_scans(parent="projects/jsk-dataplex-demo-380508/locations/us-central1")
     #print(response)
     for element in response:
-        print("START HERE---->\n")
+        #print("START HERE---->\n")
         
         #print(element.data.resource)
         print("element resource name:"+element.data.resource)
@@ -332,12 +332,12 @@ def _get_single_data_scanname(tableref):
         print("tableref:"+tableref)
         if str(element.data.resource).find(tableref) > -1:
             
-            print("FOUND at ->"+str(str(element.data.resource).find(tableref))+"\n element name:"+element.name)
-            print("END HERE---->\n")
+            #print("FOUND at ->"+str(str(element.data.resource).find(tableref))+"\n element name:"+element.name)
+            #print("END HERE---->\n")
             return element.name
         else: 
-            print("NOT FOUND in :"+str(element.data.resource))
-        print("END HERE---->\n")
+            print("_get_single_data_scanname: NOT datascanname FOUND in :"+str(element.data.resource))
+       # print("END HERE---->\n")
    # return "NOT FOUND"
 
 @lru_cache(maxsize=32)
@@ -768,9 +768,11 @@ def generate_column_formula(tablename,column,profile,sql_queries):
         schema_str+=field.name+":"+field.field_type+","
     prompt=_get_prompt_column_formula(column,tablename,schema_str,profile,sql_queries)
     
+    #print("generate_column_formula:"+column+" table " +tablename+" -> accessing llm -> prompt:"+prompt)
     text_model= GenerativeModel("gemini-pro")
     print("generate_column_formula:"+column+" table " +tablename+" -> accessing llm")
     generated_description = text_model.generate_content(prompt)
+  
     returned_text=""
     
     for i in generated_description.candidates:

@@ -236,7 +236,7 @@
                 visibility: visible;
             }
 
-    }
+    
         </style>
          </br>
         
@@ -307,12 +307,12 @@
                             <th width="50">Column</th>
                             <th width="50">Type</th>
                             <th width="100">Description</th>
-                            <th width="100">   </th>
+                            <th width="100"> <span id="tab" class="tab" style="font-weight:normal" >Generate All</span> </th>
                             <th width="200">Generated description</th>
                             <th width="200">Generated calculation formula</th>
-                            <th width="50">   </th>
-                            <th width="50">   </th>
-                            <th width="50"> </th>
+                            <th width="50"> <span id="tab" class="tab" style="font-weight:normal" >Accept All</span>  </th>
+                            <th width="50">  </th>
+                            <th width="50">  <span id="tab" class="tab" style="font-weight:normal" >Suggest All</span></th>
                             <th width="200"> Suggest business glossary terms</th>
                         </tr>
                     </thead>
@@ -332,8 +332,9 @@
                             <td><div id="term_{{ column.column }}" ></span></td>
                         </tr>
                         {% endfor %}
+                        {% for column in result.schema.columns %}
                         <script>
-                            {% for column in result.schema.columns %}
+                            
                             document.getElementById('button_{{ column.column }}').addEventListener('click', function() {
                             
                             var genElement = document.getElementById('gen_{{ column.column }}');
@@ -407,8 +408,8 @@
                                 console.error(error); // Log any errors to the console
                             });
                     });
-                        {% endfor %}
-                        </script>
+                        
+                        </script>{% endfor %}
                     </tbody>
                 </table>
  </div>
