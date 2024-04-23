@@ -57,11 +57,13 @@ class Client:
             table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"])
         table_description_prompt = constants["PROMPTS"]["SYSTEM_PROMPT"] + \
             constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT"] + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
-        description = self._llm_inference(table_description_prompt.format(
-            table_fqn, table_schema, table_sample))
+        table_description_prompt_expanded = table_description_prompt.format(
+            table_fqn, table_schema, table_sample)
+        description = self._llm_inference(table_description_prompt_expanded)
         self._update_table_description(table_fqn, description)
         logger.info("Table {} description updated.".format(table_fqn))
-        logger.info("Prompt used is .".format(table_description_prompt))
+        logger.info("Prompt used is {}".format(
+            table_description_prompt_expanded))
         
         
     def generate_column_description(self, table_fqn: str) -> None:
