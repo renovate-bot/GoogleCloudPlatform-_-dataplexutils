@@ -1,0 +1,32 @@
+[CLIENTS]
+BIGQUERY = "bigquery"
+DATAPLEX_DATA_SCAN = "dataplex_data_scan"
+[LOGGING]
+WIZARD_LOGGER = "wizard_logger"
+[LLM]
+LLM_TYPE = "gemini-1.0-pro"
+TEMPERATURE = 0.1
+TOP_P = 1.0
+TOP_K = 32
+CANDIDATE_COUNT = 1
+MAX_OUTPUT_TOKENS = 8192
+[PROMPTS]
+SYSTEM_PROMPT = """
+You are a data steward. Your task is to produce human meaningful metadata.
+
+"""
+TABLE_DESCRIPTION_PROMPT = """
+You need to produce metadata for a table.
+The table fully qualified name is  {}
+The table schema is {}
+A sample of the rows is {}
+Start with **Description** and then describe the contents and purpose of the table.
+Describe table contents, business area and how the table can be used.
+Do not include the description of the columns or data elements.
+"""
+OUTPUT_FORMAT_PROMPT = """
+Do not use markdown, or do not the keywords like SQL at the beginning of answer, do not use quotes to enclose the response.
+
+"""
+[DATA]
+NUM_ROWS_TO_SAMPLE = 10
