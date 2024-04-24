@@ -34,9 +34,13 @@
         <!-- END: section-separator -->
         
         
-
-        Dataplex collected metadata: 
-        </br>
+        <table>
+            <tr>
+                <th>Dataplex collected metadata</th>
+                <th>Which metadata use for generation</th>
+            </tr>
+            <tr>
+                <td>
         <div class="content-container">
             Lineage
             {% for detail in details %}
@@ -67,7 +71,6 @@
                         });
                 });
             </script>
-        </div>
 
         <div style="margin-top: 20px;margin-bottom: 20px;"> Enrich context for description with additional PDF documentation
         </br>
@@ -76,6 +79,36 @@
             <input type="submit" value="Upload" id="pdfSubmit">
           </form>
         </div>
+    </td>
+    <td>
+        <div>
+            <label>
+              <input type="checkbox" id="use_lineage" value="use_lineage" checked>
+              <span>Lineage</span>
+            </label>
+          </div>
+          <div>
+            <label>
+              <input type="checkbox" id="use_profile" value="use_profile" checked>
+              <span>Profile</span>
+            </label>
+          </div>
+          <div>
+            <label>
+              <input type="checkbox" id="use_pdf" value="use_pdf">
+              <span>PDF documentation</span>
+            </label>
+          </div>
+          <div>
+            <label>
+              <input type="checkbox" id="use_origin"  value="use_origin" checked>
+              <span>Originating table description</span>
+            </label>
+          </div>
+
+    </td>
+</tr>
+</table>
         
         <div class="content-container">
         <script>
@@ -94,6 +127,7 @@
                     if (xhr.status === 200) {
                         // Handle successful upload
                         console.log('File uploaded successfully');
+                        document.getElementById('use_pdf').checked = true;
                     } else {
                         // Handle upload error
                         console.error('File upload failed');
@@ -137,7 +171,7 @@
 
                 <thead>
                     <tr>
-                        <th class="first-column">Metadata</th>
+                        <th class="first-column" style="padding-top: 40px;">Table Metadata</th>
 
                     </tr>
                 </thead>
@@ -180,10 +214,16 @@
                         <script>
                             document.getElementById('button_tabdesc').addEventListener('click', function() {
                                 var genElement = document.getElementById('tab_description');
+                                var use_lineage = document.getElementById('use_lineage').checked;
+                                var use_profile = document.getElementById('use_profile').checked;
+                                var use_pdf = document.getElementById('use_pdf').checked;
+                                var use_origin = document.getElementById('use_origin').checked;
+
                                 genElement.textContent = "Generating...";
                                 genElement.classList.add("pulsate");
 
-                                fetch('/generateTableDescription?entry_id={{entry_id}}')
+
+                                fetch('/generateTableDescription?entry_id={{entry_id}}&use_lineage=' + use_lineage + '&use_profile=' + use_profile + '&use_pdf=' + use_pdf + '&use_origin=' + use_origin)
                                     .then(response => response.text())
                                     .then(data => {
                                         // Remove "Description" tag
@@ -230,6 +270,7 @@
                 left: 50%;
                 transform: translateX(-50%);
                 transition: visibility 0.3s;
+                z-index: 1; /* Add this line */
             }
         
             .tab:hover .popup {
@@ -336,16 +377,34 @@
                         <script>
                             
                             document.getElementById('button_{{ column.column }}').addEventListener('click', function() {
-                            
+                            var use_lineage = document.getElementById('use_lineage').checked;
+                            var use_profile = document.getElementById('use_profile').checked;
+                            var use_pdf = document.getElementById('use_pdf').checked;
+                            var use_origin = document.getElementById('use_origin').checked;
+
                             var genElement = document.getElementById('gen_{{ column.column }}');
                             genElement.textContent = "Generating...";
                             genElement.classList.add("pulsate");
+                            fetch('/generateColumnDescription?entry_id={{entry_id}}&column={{ column.column }}&use_lineage=' + use_lineage + '&use_profile=' + use_profile + '&use_pdf=' + use_pdf + '&use_origin=' + use_origin)
+                                .then(response => response.text())
+                                .then(data => {
+                                    genElement.textContent = data;
+                                    genElement.classList.remove("pulsate");
+                                });
+
+                            fetch('/generateColumnFormula?entry_id={{entry_id}}&column={{ column.column }}')
+                                .then(response => response.text())
+                                .then(data => {
+                                    formElement.textContent = data;
+                                    formElement.classList.remove("pulsate");
+                                });
                             
                             var formElement = document.getElementById('form_{{ column.column }}');
                             formElement.textContent = "Generating...";
                             formElement.classList.add("pulsate");
-        
-                            fetch('/generateColumnDescription?entry_id={{entry_id}}&column={{ column.column }}')
+                            
+
+                            fetch('/generateColumnDescription?entry_id={{entry_id}}&column={{ column.column }}&use_lineage=' + use_lineage + '&use_profile=' + use_profile + '&use_pdf=' + use_pdf + '&use_origin=' + use_origin)
                                 .then(response => response.text())
                                 .then(data => {
                                     genElement.textContent = data;

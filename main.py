@@ -2,7 +2,7 @@ from flask import Flask, request, render_template, jsonify
 from  metadata.metadata import get_policy_tags_for_columns,generate_column_lineage,suggest_column_glossary_terms,pdf_to_images,combine_images,generate_column_formula,extract_metadata,generate_column_description,_search_data_catalog,_get_entry_details,get_dependencies_info,_get_table_profile,generate_table_description
 from flask_caching import Cache
 
-from metadata_v2.metadata_v2 import MetadataWizard
+from metadata_v2.metadata_v2 import MetadataWizard,MetadataWizardOptions
 
 #from pdf_ai_flask.pdf import pdf_to_images,combine_images,query_gemini
 import base64
@@ -58,13 +58,17 @@ def details():
 @app.route('/generateTableDescription/', methods=['GET','POST'])
 def generateTableDescription():
     entry_id = request.args.get('entry_id')
+    generation_options=MetadataWizardOptions(use_pdf=request.args.get('use_pdf'),use_origin=request.args.get('use_origin'),\
+                                             use_profile=request.args.get('use_profile'),use_lineage=request.args.get('use_lineage'))
+
+
     start_time = time.time()
     result = wizard._get_entry_details(entry_id)  # Replace this with your function to get a result by ID
     print("generate():result['fullyQualifiedName']:",result['fullyQualifiedName'])
     additional_info=wizard.get_dependencies_info(result['fullyQualifiedName'])
     profile_info=wizard._get_table_profile(entry_id)
     generated_description=wizard.generate_table_description(tablename=result['fullyQualifiedName'],profile=profile_info,\
-                                                    sql_queries=additional_info,pdf=global_dict.popitem()[1] if global_dict else None)
+                                                    sql_queries=additional_info,pdf=global_dict.popitem()[1] if global_dict else None,options=generation_options)
     end_time = time.time()
     render_time = end_time - start_time
     print("generateTableDescription():render_time:",render_time)
@@ -90,6 +94,9 @@ def generateColumnSuggestedTerms():
 @app.route('/generateColumnDescription/', methods=['GET','POST'])
 def generateColumnDescription():
     entry_id = request.args.get('entry_id')
+    generation_options=MetadataWizardOptions(use_pdf=request.args.get('use_pdf'),use_origin=request.args.get('use_origin'),\
+                                            use_profile=request.args.get('use_profile'),use_lineage=request.args.get('use_lineage'))
+
     column_name = request.args.get('column')
     start_time = time.time()
     
@@ -100,7 +107,7 @@ def generateColumnDescription():
     additional_info=wizard.get_dependencies_info(result['fullyQualifiedName'])
     profile_info=wizard._get_table_profile(entry_id)
     generated_description=wizard.generate_column_description(tablename=result['fullyQualifiedName'],column=column_name,profile=profile_info,\
-                                                     sql_queries=additional_info)
+                                                     sql_queries=additional_info,options=generation_options)
     end_time = time.time()
     render_time = end_time - start_time
     print("generateColumnDescription():render_time:",render_time)

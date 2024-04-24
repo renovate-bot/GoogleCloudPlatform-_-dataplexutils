@@ -28,14 +28,29 @@ from PIL import Image
 import re
 
 
+class MetadataWizardOptions:
+    def __init__(self,use_pdf=False,use_profile=False,use_lineage=False,use_origin=False):
+        self.use_pdf=use_pdf
+        self.use_profile=use_profile
+        self.use_lineage=use_lineage
+        self.use_origin=use_origin
+
+    use_pdf=False,
+    use_profile=False,
+    use_lineage=False,
+    use_origin=False
 
 class MetadataWizard:
     project_id=None
+    region="us"
     dc_client=datacatalog_v1.DataCatalogClient()
     dc_policytagmanager_client=datacatalog_v1beta1.PolicyTagManagerClient()
     bqclient = None
     lineageclient=lineage_v1.LineageClient()
     dataplexscanservice_client=dataplex_v1.DataScanServiceClient()
+
+
+    
     
 
     def get_datacatalog_client(self):
@@ -210,7 +225,8 @@ class MetadataWizard:
         return self.lineageclient
     
     def get_bq_client(self):
-        return self.bqclient
+
+        return self.bqclient 
 
     @lru_cache(maxsize=32)
     def _get_table_bq(self,project_id, dataset_name, table_name):
@@ -223,7 +239,7 @@ class MetadataWizard:
     def _get_table_schema_bq(self,project_id, dataset_name, table_name):
         bqclient = self.get_bq_client() # bigquery.Client(project=project_id)
         """Get the schema of a table in BigQuery."""
-        table = bqclient.get_table(f"{dataset_name}.{table_name}")
+        table = bqclient.get_table(f"{project_id}.{dataset_name}.{table_name}")
         return table.schema
 
     @lru_cache(maxsize=32)
@@ -244,7 +260,7 @@ class MetadataWizard:
         print(f"_bq_job_details: Type: {job.job_type}")
         print(f"_bq_job_details: State: {job.state}")
         print(f"_bq_job_details: Created: {job.created.isoformat()}")
-        print(f"_bq_job_details: Query: {job.query}")
+       # print(f"_bq_job_details: Query: {job.query}")
         return job
 
 
@@ -346,7 +362,7 @@ class MetadataWizard:
         for i in response['links']:
             links.append(i['name'])
             print('find_lineage looking for link:' + i['name'])
-        request = lineage_v1.BatchSearchLinkProcessesRequest(parent="projects/446454295341/locations/us",links=links)
+        request = lineage_v1.BatchSearchLinkProcessesRequest(parent=f"projects/{self.project_id}/locations/{self.region}",links=links)
         #make the request
 
         page_result = client.batch_search_link_processes(request=request)
@@ -372,7 +388,7 @@ class MetadataWizard:
             job_details=[]    
             for i in processes:
                 result=self.get_process_details(i)
-                print('get_dependencies_info:process details: '+result.query)
+                #print('get_dependencies_info:process details: '+result.query)
                 job_details.append(result)
         
         #profile=_get_table_profile(tablename)
@@ -461,26 +477,37 @@ class MetadataWizard:
 
                     
 
-    def _get_prompt(self,tablename,schema_str,profile,sql_queries):
+    def _get_prompt(self,tablename,schema_str,profile,sql_queries,options=MetadataWizardOptions()):
         queries=""
         for i in sql_queries:
             queries=queries+i.query+";"
+        print("_get_prompt:using configuration: lineage"+str(options.use_lineage)+\
+              " profile:"+str(options.use_profile)+" origin:"+str(options.use_origin)+\
+              " pdf:"+str(options.use_pdf))
 
-        
 
         contents="You are a data steward. Your role is to produce human meaningful metadata descriptions of tables.\
-        Table's fully qualified "+tablename+". \
-        This is table schema"+schema_str+".\
-        These SQL queries can be used to generate the data in table \
-        "+ queries +"\
-        This is table profile information "+profile+"\
+        Table's fully qualified name "+tablename+". \
+        This is table schema"+schema_str+"."
+        
+        if options.use_lineage:
+            contents+=" These SQL queries can be used to generate the data in table "+ queries +"."
+            print("_get_prompt:use_lineage is true")
+
+        if options.use_profile:
+            contents+=" This is table profile information "+profile+"."  
+            print("_get_prompt:use_profile is true")  
+
+        #if options.use_origin==True:
+
+        contents+="Task for today is: \
         Provide two part description of a table - first paragraph starting with **Description** is describing contents and purpose of the table. It describes table contents, business area and how the table can be used. It does not describe each column but generalizes table contents. \
         Second paragraph starting with **Source** provides information how is that table is calculated from originating tables, mentiones level of aggregation, Which tables are joined, What data is filterd,  what are most sifgnificant data transformations. If there's no lineage information then second paragraph is ommited\
         do not use markdown, or do not the keywords like 'sql' at the beginning of answer, do not use ``` to enclose the response\
         "
         return contents
 
-    def _get_prompt_column(self,column,tablename,schema_str,profile,sql_queries):
+    def _get_prompt_column(self,column,tablename,schema_str,profile,sql_queries,options=MetadataWizardOptions()):
         queries=""
         for i in sql_queries:
             queries=queries+i.query+";"
@@ -488,11 +515,15 @@ class MetadataWizard:
         contents="You are a data expert. Your role is to be a data steward. Your task is to produce human meaningful metadata \
         descriptions with business interpretation of table.\
         Table's fully qualified name:"+tablename+". \
-        This is table schema"+schema_str+".\
-        These SQL queries are used to generate the data in table \
-        "+ queries +"\
-        This is table profile information "+profile+"\
-        Task for today is: \
+        This is table schema"+schema_str+"."
+
+        if options.use_lineage:
+            contents+=" These SQL queries are used to generate the data in table "+ queries+"."
+
+        if options.use_profile:
+            contents+=" This is table profile information "+profile+"."    
+
+        contents+="Task for today is: \
         Please provide max 50words long description of column:"+column+" \
         Examples of descriptions: \
         'The cn column in the table cc represents the case number. It is a unique identifier for each row in the table. The case number is a string that is typically 9 characters long. The first two characters of the case number indicate the year in which the case was filed. The next two characters indicate the month in which the case was filed. The next two characters indicate the day of the month in which the case was filed. The last three characters of the case number are a sequential number.'\
@@ -562,7 +593,7 @@ class MetadataWizard:
 
             #first query bison to find for source tables
             tables='''{"tables":['''
-            tables+=call_bison('''You are an SQL expert. This is a sql for analysis:'''+query.query+'''. provide source table used to load the data in table '''+tablename+'''\
+            tables+=self.call_bison('''You are an SQL expert. This is a sql for analysis:'''+query.query+'''. provide source table used to load the data in table '''+tablename+'''\
             example: "project_name.dataset_name.table_name","another_project.some_dataset_name.other_table_name"\
             example: "project_name.dataset_name.table_name","another_project.some_dataset_name.other_table_name","anothe123r_project.so12me_dataset_name.othe32r_table_name"\
             example: "anothe_project.so12me_dataset_name.othe_tabl_name"\
@@ -630,7 +661,7 @@ class MetadataWizard:
             
 
             #returned_text+=call_bison(contents)+","
-            unverified_text=call_gemini(contents)
+            unverified_text=self.call_gemini(contents)
             print("Unverified lineage:"+unverified_text)
             
             check_for_alias_prompt='''You are a data expert very skilled in SQL understanding. I need your verify if columns listed \
@@ -735,7 +766,7 @@ class MetadataWizard:
 
 
 
-    def generate_table_description(self,tablename,profile,sql_queries,pdf):
+    def generate_table_description(self,tablename,profile,sql_queries,pdf,options):
 
         project,dataset,table=self._read_fqdn(tablename)
         
@@ -745,15 +776,25 @@ class MetadataWizard:
         for field in schema:
             schema_str+=field.name+":"+field.field_type+","
     
-
-        prompt=self._get_prompt(tablename,schema_str,profile,sql_queries)
+        print("generate_table_description:generating with options: use_pdf:"+str(options.use_pdf)+"profile:"+str(options.use_profile)+"lineage:"\
+              +str(options.use_lineage)+"profile:"+str(options.use_profile))
         
+        prompt=self._get_prompt(tablename,schema_str,profile,sql_queries,options)
+        # Save prompt as JSON file
+      #  with open('prompt.json', 'w') as file:
+      #      json.dump(prompt, file)
+
+
+        if prompt is None:
+            return "ERROR generating description - Prompt is None"
+        
+
         text_model= GenerativeModel("gemini-pro")
         print("generate_table_description:accessing llm")
         if pdf is not None:
             #not sending profile to vision because it is too large
-            prompt=_get_prompt(tablename,schema_str,"",sql_queries)
-            returned_text=call_vision_gemini(pdf,prompt)
+            prompt=self._get_prompt(tablename,schema_str,profile,sql_queries)
+            returned_text=self.call_vision_gemini(pdf,prompt)
             
         else:
             generated_description = text_model.generate_content(prompt)
@@ -766,20 +807,15 @@ class MetadataWizard:
         print("generate_table_description:generated description")
         return returned_text
 
+    def generate_column_description(self,tablename,column,profile,sql_queries,options):
 
-
-
-    def generate_column_description(self,tablename,column,profile,sql_queries):
-
-        project,dataset,table=self._read_fqdn(tablename)
-        
+        project,dataset,table=self._read_fqdn(tablename)      
         schema=self._get_table_schema_bq(project, dataset, table)
-
         schema_str=""
         for field in schema:
             schema_str+=field.name+":"+field.field_type+","
 
-        prompt=self._get_prompt_column(column,tablename,schema_str,profile,sql_queries)
+        prompt=self._get_prompt_column(column,tablename,schema_str,profile,sql_queries,options)
         
 
 
@@ -932,7 +968,7 @@ class MetadataWizard:
 
     def call_vision_gemini(self,base64_image,text_prompt):
         # Initialize the model
-        model_name="gemini-pro-vision"
+        model_name="gemini-1.5-pro-preview-0409" #"gemini-pro-vision"
         model = GenerativeModel(model_name)
         
         # Decode the base64-encoded image to get raw image data
@@ -974,7 +1010,8 @@ class MetadataWizard:
         # Return the collected responses
         #return response_texts
 
-    import re
+
+
     def _read_entryid(entry_id="//bigquery.googleapis.com/projects/jsk-dataplex-demo-380508/datasets/metadata_generation/tables/ccagg"):
 
         pattern = r".*/tables/(.+)"  # Capture everything after the last '/'
