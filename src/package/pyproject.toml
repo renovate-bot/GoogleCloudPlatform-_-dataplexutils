@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dataplexutils_metadata_wizard"
+authors = [
+    {name = "Jakub Skuratowicz", email = "kubas@google.com"}
+
+]
+description = "Google Dataplex metadata automation using Generative AI"
+version = "0.0.1"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pandas",
+    "toml",
+    "google-cloud-bigquery",
+    "google-cloud-datacatalog",
+    "google-cloud-dataplex",
+    "google-cloud-aiplatform>=1.48.0"
+
+]
