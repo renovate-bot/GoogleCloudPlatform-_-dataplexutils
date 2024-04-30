@@ -28,10 +28,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(constants["LOGGING"]["WIZARD_LOGGER"])
 
 
+class ClientOptions:
+    """Represents the client options for the metadata wizard client.
+    """
+    def __init__(self, use_lineage_tables=False, use_lineage_processes=False, use_profile=False, use_data_quality=False):
+        self._use_lineage_tables = use_lineage_tables
+        self._use_lineage_processes = use_lineage_processes
+        self._use_profile = use_profile
+        self._use_data_quality = use_data_quality
+
+
 class Client:
     """Represents the main metadata wizard client.
     """
-    def __init__(self, project_id: str, location: str):
+
+    def __init__(self, project_id: str, location: str, client_options: ClientOptions = None):
+        if client_options:
+            self._client_options = client_options
+        else:
+            self._client_options = ClientOptions()
         self._project_id = project_id
         self._location = location
         self._cloud_clients = {constants["CLIENTS"]
@@ -60,12 +75,28 @@ class Client:
             table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"])
         table_description_prompt = constants["PROMPTS"]["SYSTEM_PROMPT"] + \
             constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT"] + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
-        table_profile_quality = self._get_table_profile_quality(
-            table_fqn)
-        table_sources_info = self._get_table_sources_info(table_fqn)
-        job_sources_info = self._get_job_sources(table_fqn)
+        if self._client_options._use_data_quality:
+            table_profile_quality = self._get_table_profile_quality(
+                table_fqn)
+            table_quality = table_profile_quality['data_quality']
+        else:
+            table_quality = ""
+        if self._client_options._use_profile:
+            table_profile_quality = self._get_table_profile_quality(
+                table_fqn)
+            table_profile = table_profile_quality['data_profile']
+        else:
+            table_profile = ""
+        if self._client_options._use_lineage_tables:
+            table_sources_info = self._get_table_sources_info(table_fqn)
+        else:
+            table_sources_info = ""
+        if self._client_options._use_lineage_processes:
+            job_sources_info = self._get_job_sources(table_fqn)
+        else:
+            job_sources_info = ""
         table_description_prompt_expanded = table_description_prompt.format(
-            table_fqn, table_schema, table_sample, table_profile_quality['data_profile'], table_profile_quality['data_quality'], table_sources_info, job_sources_info)
+            table_fqn, table_schema, table_sample, table_profile, table_quality, table_sources_info, job_sources_info)
         description = self._llm_inference(table_description_prompt_expanded)
         self._update_table_description(table_fqn, description)
         
