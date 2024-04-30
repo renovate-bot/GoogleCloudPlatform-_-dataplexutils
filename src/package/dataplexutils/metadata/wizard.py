@@ -4,6 +4,7 @@
 """Dataplex Utils Metadata Wizard main logic
    2024 Google
 """
+from .version import __version__
 # OS Imports
 import logging
 import toml
@@ -19,6 +20,7 @@ from google.cloud import datacatalog_lineage_v1
 from google.cloud.dataplex_v1.types.datascans import DataScanJob
 from google.cloud.exceptions import NotFound
 from vertexai.generative_models import GenerationConfig, GenerativeModel
+
 
 # Load constants
 constants = toml.loads(pkgutil.get_data(
