@@ -23,6 +23,8 @@ The table schema is {}
 A sample of the rows is {}
 The table profile information is {}
 The table quality information is {}
+The table is generated using the following tables {}
+The table is generated using the following queries {}
 Start with **Description** and then describe the contents and purpose of the table.
 Describe table contents, business area and how the table can be used.
 Do not include the description of the columns or data elements.

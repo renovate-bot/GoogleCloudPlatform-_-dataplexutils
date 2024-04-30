@@ -9,9 +9,9 @@ import logging
 import toml
 import pkgutil
 import re
+import json
 # Cloud imports
 import vertexai
-import json
 from google.cloud import bigquery
 from google.cloud import dataplex_v1
 from google.cloud.dataplex_v1 import GetDataScanRequest, ListDataScanJobsRequest, GetDataScanJobRequest
@@ -62,13 +62,13 @@ class Client:
             constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT"] + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
         table_profile_quality = self._get_table_profile_quality(
             table_fqn)
+        table_sources_info = self._get_table_sources_info(table_fqn)
+        job_sources_info = self._get_job_sources(table_fqn)
         table_description_prompt_expanded = table_description_prompt.format(
-            table_fqn, table_schema, table_sample, table_profile_quality['data_profile'], table_profile_quality['data_quality'])
+            table_fqn, table_schema, table_sample, table_profile_quality['data_profile'], table_profile_quality['data_quality'], table_sources_info, job_sources_info)
         description = self._llm_inference(table_description_prompt_expanded)
         self._update_table_description(table_fqn, description)
-        logger.info("Table {} description updated.".format(table_fqn))
-        logger.info(f"Prompt used is {table_description_prompt_expanded}")
-        logger.info(f"Description is {description}")
+        
              
     def generate_column_description(self, table_fqn: str) -> None:
         """Generates metadata on the columns.
@@ -97,7 +97,9 @@ class Client:
             self._cloud_clients[constants["CLIENTS"]
                                 ["BIGQUERY"]].get_table(table_fqn)
         except NotFound:
-            logger.error("Table {} is not found.".format(table_fqn))
+            logger.error(f"Table {table_fqn} is not found.")
+            raise NotFound(
+                message=f"Table {table_fqn} is not found.")
       
     def _get_table_schema(self, table_fqn):
         try:
@@ -109,17 +111,18 @@ class Client:
                                  } for field in schema_fields]
             return flattened_schema
         except NotFound:
-            logger.error("Table {} is not found.".format(table_fqn))
-            raise NotFound(message="Table {} is not found.".format(table_fqn))
+            logger.error(f"Table {table_fqn} is not found.")
+            raise NotFound(
+                message=f"Table {table_fqn} is not found.")
 
     def _get_table_sample(self, table_fqn, num_rows_to_sample):
         try:
-            client = self._cloud_clients[constants["CLIENTS"]
+            bq_client = self._cloud_clients[constants["CLIENTS"]
                                             ["BIGQUERY"]]
             query = (f"SELECT * FROM {table_fqn} LIMIT {num_rows_to_sample}")
-            return client.query(query).to_dataframe().to_json()
+            return bq_client.query(query).to_dataframe().to_json()
         except Exception as e:
-            logger.error("Exception {}.".format(e))
+            logger.error(f"Exception: {e}.")
             raise e
 
     def _split_table_fqn(self, table_fqn):
@@ -128,7 +131,7 @@ class Client:
             match = re.search(pattern, table_fqn)
             return match.group(1), match.group(2), match.group(3)
         except Exception as e:
-            logger.error("Exception {}.".format(e))
+            logger.error(f"Exception: {e}.")
             raise e
 
     def _construct_bq_resource_string(self, table_fqn):
@@ -136,35 +139,37 @@ class Client:
             project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
             return f"//bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
         except Exception as e:
-            logger.error("Exception {}.".format(e))
+            logger.error(f"Exception: {e}.")
             raise e
  
     def _get_table_scan_reference(self, table_fqn):
         try:
             scan_reference = None
-            client = self._cloud_clients[constants["CLIENTS"]
+            scan_client = self._cloud_clients[constants["CLIENTS"]
                                          ["DATAPLEX_DATA_SCAN"]]
-            data_scans = client.list_data_scans(parent=f"projects/{self._project_id}/locations/{self._location}")
+            data_scans = scan_client.list_data_scans(
+                parent=f"projects/{self._project_id}/locations/{self._location}")
             bq_resource_string = self._construct_bq_resource_string(table_fqn)
             for scan in data_scans:
                 if scan.data.resource == bq_resource_string:
                     scan_reference = scan.name
             return scan_reference
         except Exception as e:
-            logger.error("Exception {}.".format(e))
+            logger.error(f"Exception: {e}.")
             raise e
 
     def _get_table_profile_quality(self, table_fqn):
         try:
-            client = self._cloud_clients[constants["CLIENTS"]
+            scan_client = self._cloud_clients[constants["CLIENTS"]
                                         ["DATAPLEX_DATA_SCAN"]]
             data_profile_results = []
             data_quality_results = []
             table_scan_reference = self._get_table_scan_reference(table_fqn)
             if table_scan_reference:
-                for job in client.list_data_scan_jobs(ListDataScanJobsRequest(parent=client.get_data_scan(GetDataScanRequest(
+                for job in scan_client.list_data_scan_jobs(ListDataScanJobsRequest(parent=client.get_data_scan(GetDataScanRequest(
                         name=table_scan_reference)).name)):
-                    job_result = client.get_data_scan_job(request=GetDataScanJobRequest(name=job.name, view="FULL"))
+                    job_result = scan_client.get_data_scan_job(
+                        request=GetDataScanJobRequest(name=job.name, view="FULL"))
                     if job_result.state == DataScanJob.State.SUCCEEDED:
                         job_result_json = json.loads(
                             dataplex_v1.types.datascans.DataScanJob.to_json(job_result))
@@ -175,7 +180,75 @@ class Client:
                                 job_result_json["dataProfileResult"])
             return {"data_profile": data_profile_results, "data_quality": data_quality_results}
         except Exception as e:
-            logger.error("Exception {}.".format(e))
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def _get_table_sources_info(self, table_fqn):
+        try:
+            table_sources_info = []
+            table_sources = self._get_table_sources(table_fqn)
+            for table_source in table_sources:
+                table_sources_info.append({
+                    "source_table_name": table_source,
+                    "source_table_schema": self._get_table_schema(table_source),
+                    "source_table_description": self._get_table_description(table_source),
+                    "source_table_sample": self._get_table_sample(table_source, constants["DATA"]["NUM_ROWS_TO_SAMPLE"])
+                })
+            return table_sources_info
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e    
+
+    def _get_table_sources(self, table_fqn):
+        try:
+            lineage_client = self._cloud_clients[constants["CLIENTS"]
+                                                ["DATA_CATALOG_LINEAGE"]]
+            target = datacatalog_lineage_v1.EntityReference()
+            target.fully_qualified_name = f"bigquery:{table_fqn}"
+            request = datacatalog_lineage_v1.SearchLinksRequest(
+                parent=f"projects/{self._project_id}/locations/{self._location}", target=target)
+            link_results = lineage_client.search_links(request=request)
+            table_sources = []
+            for link in link_results:
+                if link.target == target:
+                    table_sources.append(
+                        link.source.fully_qualified_name.replace("bigquery:", ""))
+            return table_sources
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def _get_job_sources(self, table_fqn):
+        try:
+            lineage_client = datacatalog_lineage_v1.LineageClient()
+            bq_process_sql = []
+            lineage_client = self._cloud_clients[constants["CLIENTS"]
+                                                ["DATA_CATALOG_LINEAGE"]]
+            target = datacatalog_lineage_v1.EntityReference()
+            target.fully_qualified_name = f"bigquery:{table_fqn}"
+            request = datacatalog_lineage_v1.SearchLinksRequest(
+                parent=f"projects/{self._project_id}/locations/{self._location}", target=target)
+            link_results = lineage_client.search_links(request=request)
+            links = [link.name for link in link_results]
+            lineage_processes_ids = [process.process for process in lineage_client.batch_search_link_processes(
+                request=datacatalog_lineage_v1.BatchSearchLinkProcessesRequest(parent=f"projects/{self._project_id}/locations/{self._location}", links=links))]
+            for process_id in lineage_processes_ids:
+                process_details = lineage_client.get_process(request=datacatalog_lineage_v1.GetProcessRequest(
+                    name=process_id,
+                ))
+                if "bigquery_job_id" in process_details.attributes:
+                    bq_process_sql.append(self._bq_job_info(process_details.attributes["bigquery_job_id"]))
+            return bq_process_sql
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def _bq_job_info(self, bq_job_id):
+        try:
+            return self._cloud_clients[constants["CLIENTS"]
+                                ["BIGQUERY"]].get_job(bq_job_id, location=self._location).query
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
             raise e
 
     def _llm_inference(self, prompt):
@@ -202,7 +275,16 @@ class Client:
             )
             return responses.text
         except Exception as e:
-            logger.error("Exception {}.".format(e))
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def _get_table_description(self, table_fqn):
+        try:
+            table = self._cloud_clients[constants["CLIENTS"]
+                                    ["BIGQUERY"]].get_table(table_fqn)
+            return table.description
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
             raise e
 
     def _update_table_description(self, table_fqn, description):
@@ -213,5 +295,5 @@ class Client:
             _ = self._cloud_clients[constants["CLIENTS"]
                                     ["BIGQUERY"]].update_table(table, ["description"])
         except Exception as e:
-            logger.error("Exception {}.".format(e))
+            logger.error(f"Exception: {e}.")
             raise e
