@@ -67,8 +67,8 @@ class Client:
         description = self._llm_inference(table_description_prompt_expanded)
         self._update_table_description(table_fqn, description)
         logger.info("Table {} description updated.".format(table_fqn))
-        logger.info("Prompt used is {}".format(
-            table_description_prompt_expanded))
+        logger.info(f"Prompt used is {table_description_prompt_expanded}")
+        logger.info(f"Description is {description}")
              
     def generate_column_description(self, table_fqn: str) -> None:
         """Generates metadata on the columns.
@@ -110,6 +110,7 @@ class Client:
             return flattened_schema
         except NotFound:
             logger.error("Table {} is not found.".format(table_fqn))
+            raise NotFound(message="Table {} is not found.".format(table_fqn))
 
     def _get_table_sample(self, table_fqn, num_rows_to_sample):
         try:
@@ -119,6 +120,7 @@ class Client:
             return client.query(query).to_dataframe().to_json()
         except Exception as e:
             logger.error("Exception {}.".format(e))
+            raise e
 
     def _split_table_fqn(self, table_fqn):
         try:
@@ -127,6 +129,7 @@ class Client:
             return match.group(1), match.group(2), match.group(3)
         except Exception as e:
             logger.error("Exception {}.".format(e))
+            raise e
 
     def _construct_bq_resource_string(self, table_fqn):
         try:
@@ -134,6 +137,7 @@ class Client:
             return f"//bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
         except Exception as e:
             logger.error("Exception {}.".format(e))
+            raise e
  
     def _get_table_scan_reference(self, table_fqn):
         try:
@@ -148,6 +152,7 @@ class Client:
             return scan_reference
         except Exception as e:
             logger.error("Exception {}.".format(e))
+            raise e
 
     def _get_table_profile_quality(self, table_fqn):
         try:
@@ -171,6 +176,7 @@ class Client:
             return {"data_profile": data_profile_results, "data_quality": data_quality_results}
         except Exception as e:
             logger.error("Exception {}.".format(e))
+            raise e
 
     def _llm_inference(self, prompt):
         try:
@@ -197,6 +203,7 @@ class Client:
             return responses.text
         except Exception as e:
             logger.error("Exception {}.".format(e))
+            raise e
 
     def _update_table_description(self, table_fqn, description):
         try:
@@ -207,3 +214,4 @@ class Client:
                                     ["BIGQUERY"]].update_table(table, ["description"])
         except Exception as e:
             logger.error("Exception {}.".format(e))
+            raise e
