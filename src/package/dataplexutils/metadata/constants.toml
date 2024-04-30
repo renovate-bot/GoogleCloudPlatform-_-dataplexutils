@@ -23,9 +23,14 @@ The table schema is {}
 A sample of the rows is {}
 The table profile information is {}
 The table quality information is {}
-Start with **Description** and then describe the contents and purpose of the table.
+Lineage information:
+    The table is generated using the following tables {}
+    The table is generated using the following queries {}
+Produce two paragraphs:
+The first paragraph starts with **Description** and then describe the contents and purpose of the table.
 Describe table contents, business area and how the table can be used.
 Do not include the description of the columns or data elements.
+The first paragraph starts with **Source** and provide information how is that table is calculated from originating tables, mentiones level of aggregation, Which tables are joined, what data is filterd, what are most sifgnificant data transformations. If there's no lineage information then second paragraph is ommited.
 """
 OUTPUT_FORMAT_PROMPT = """
 Do not use markdown, or do not the keywords like SQL at the beginning of answer, do not use quotes to enclose the response.
