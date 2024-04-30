@@ -143,13 +143,14 @@ class Client:
         try:
             scan_reference = None
             client = self._cloud_clients[constants["CLIENTS"]
-                                         ["DATAPLEX_DATA_SCAN"]]
-            data_scans = client.list_data_scans(parent=f"projects/{self._project_id}/locations/{self._location}")
+                                         ["DATAPLEX_DATA_SCAN"]]                    
+            data_scans = client.list_data_scans(parent=f"projects/{self._project_id}/locations/{self._location}")            
             bq_resource_string = self._construct_bq_resource_string(table_fqn)
+            scan_references=[]
             for scan in data_scans:
                 if scan.data.resource == bq_resource_string:
-                    scan_reference = scan.name
-            return scan_reference
+                    scan_references.append(scan.name)
+            return scan_references
         except Exception as e:
             logger.error("Exception {}.".format(e))
             raise e
@@ -160,19 +161,20 @@ class Client:
                                         ["DATAPLEX_DATA_SCAN"]]
             data_profile_results = []
             data_quality_results = []
-            table_scan_reference = self._get_table_scan_reference(table_fqn)
-            if table_scan_reference:
-                for job in client.list_data_scan_jobs(ListDataScanJobsRequest(parent=client.get_data_scan(GetDataScanRequest(
-                        name=table_scan_reference)).name)):
-                    job_result = client.get_data_scan_job(request=GetDataScanJobRequest(name=job.name, view="FULL"))
-                    if job_result.state == DataScanJob.State.SUCCEEDED:
-                        job_result_json = json.loads(
-                            dataplex_v1.types.datascans.DataScanJob.to_json(job_result))
-                        if "dataQualityResult" in job_result_json:
-                            data_quality_results.append(job_result_json["dataQualityResult"])
-                        if "dataProfileResult" in job_result_json:
-                            data_profile_results.append(
-                                job_result_json["dataProfileResult"])
+            table_scan_references = self._get_table_scan_reference(table_fqn)
+            for table_scan_reference in table_scan_references:
+                if table_scan_reference:
+                    for job in client.list_data_scan_jobs(ListDataScanJobsRequest(parent=client.get_data_scan(GetDataScanRequest(
+                            name=table_scan_reference)).name)):
+                        job_result = client.get_data_scan_job(request=GetDataScanJobRequest(name=job.name, view="FULL"))
+                        if job_result.state == DataScanJob.State.SUCCEEDED:
+                            job_result_json = json.loads(
+                                dataplex_v1.types.datascans.DataScanJob.to_json(job_result))
+                            if "dataQualityResult" in job_result_json:
+                                data_quality_results.append(job_result_json["dataQualityResult"])
+                            if "dataProfileResult" in job_result_json:
+                                data_profile_results.append(
+                                    job_result_json["dataProfileResult"])
             return {"data_profile": data_profile_results, "data_quality": data_quality_results}
         except Exception as e:
             logger.error("Exception {}.".format(e))
