@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """Dataplex Utils Metadata Wizard main logic
-   2024 Google Inc. 
+   2024 Google
 """
 # OS Imports
 import logging
@@ -11,13 +11,14 @@ import pkgutil
 import re
 # Cloud imports
 import vertexai
-import pandas as pd
+import json
 from google.cloud import bigquery
 from google.cloud import dataplex_v1
+from google.cloud.dataplex_v1 import GetDataScanRequest, ListDataScanJobsRequest, GetDataScanJobRequest
+from google.cloud import datacatalog_lineage_v1
+from google.cloud.dataplex_v1.types.datascans import DataScanJob
 from google.cloud.exceptions import NotFound
 from vertexai.generative_models import GenerationConfig, GenerativeModel
-
-
 
 # Load constants
 constants = toml.loads(pkgutil.get_data(
@@ -37,6 +38,8 @@ class Client:
                                ["BIGQUERY"]: bigquery.Client(),
                                constants["CLIENTS"]
                                ["DATAPLEX_DATA_SCAN"]: dataplex_v1.DataScanServiceClient(),
+                               constants["CLIENTS"]
+                               ["DATA_CATALOG_LINEAGE"]: datacatalog_lineage_v1.LineageClient()
                                }
 
     def generate_table_description(self, table_fqn: str) -> None:
@@ -57,15 +60,16 @@ class Client:
             table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"])
         table_description_prompt = constants["PROMPTS"]["SYSTEM_PROMPT"] + \
             constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT"] + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
+        table_profile_quality = self._get_table_profile_quality(
+            table_fqn)
         table_description_prompt_expanded = table_description_prompt.format(
-            table_fqn, table_schema, table_sample)
+            table_fqn, table_schema, table_sample, table_profile_quality['data_profile'], table_profile_quality['data_quality'])
         description = self._llm_inference(table_description_prompt_expanded)
         self._update_table_description(table_fqn, description)
         logger.info("Table {} description updated.".format(table_fqn))
         logger.info("Prompt used is {}".format(
             table_description_prompt_expanded))
-        
-        
+             
     def generate_column_description(self, table_fqn: str) -> None:
         """Generates metadata on the columns.
 
@@ -94,7 +98,7 @@ class Client:
                                 ["BIGQUERY"]].get_table(table_fqn)
         except NotFound:
             logger.error("Table {} is not found.".format(table_fqn))
-            
+      
     def _get_table_schema(self, table_fqn):
         try:
             table = self._cloud_clients[constants["CLIENTS"]
@@ -107,7 +111,7 @@ class Client:
         except NotFound:
             logger.error("Table {} is not found.".format(table_fqn))
 
-    def _get_table_sample(self, table_fqn,num_rows_to_sample):
+    def _get_table_sample(self, table_fqn, num_rows_to_sample):
         try:
             client = self._cloud_clients[constants["CLIENTS"]
                                             ["BIGQUERY"]]
@@ -116,7 +120,7 @@ class Client:
         except Exception as e:
             logger.error("Exception {}.".format(e))
 
-    def _split_table_fqn(self,table_fqn):
+    def _split_table_fqn(self, table_fqn):
         try:
             pattern = r"^([^.]+)\.([^.]+)\.([^.]+)"
             match = re.search(pattern, table_fqn)
@@ -124,31 +128,51 @@ class Client:
         except Exception as e:
             logger.error("Exception {}.".format(e))
 
-    def _construct_bq_resource_string(self,table_fqn):
+    def _construct_bq_resource_string(self, table_fqn):
         try:
             project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
             return f"//bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
         except Exception as e:
             logger.error("Exception {}.".format(e))
-       
-    def _get_table_scan_reference(self,table_fqn):
+ 
+    def _get_table_scan_reference(self, table_fqn):
         try:
             scan_reference = None
             client = self._cloud_clients[constants["CLIENTS"]
                                          ["DATAPLEX_DATA_SCAN"]]
-            data_scans = client.list_data_scans(parent=f"projects/{self._project_id}/locations/{self.location}")
+            data_scans = client.list_data_scans(parent=f"projects/{self._project_id}/locations/{self._location}")
             bq_resource_string = self._construct_bq_resource_string(table_fqn)
             for scan in data_scans:
                 if scan.data.resource == bq_resource_string:
-                    scan_reference= scan.name
+                    scan_reference = scan.name
             return scan_reference
         except Exception as e:
             logger.error("Exception {}.".format(e))
 
-    def _get_table_profile(self,table_fqn):
-        pass
+    def _get_table_profile_quality(self, table_fqn):
+        try:
+            client = self._cloud_clients[constants["CLIENTS"]
+                                        ["DATAPLEX_DATA_SCAN"]]
+            data_profile_results = []
+            data_quality_results = []
+            table_scan_reference = self._get_table_scan_reference(table_fqn)
+            if table_scan_reference:
+                for job in client.list_data_scan_jobs(ListDataScanJobsRequest(parent=client.get_data_scan(GetDataScanRequest(
+                        name=table_scan_reference)).name)):
+                    job_result = client.get_data_scan_job(request=GetDataScanJobRequest(name=job.name, view="FULL"))
+                    if job_result.state == DataScanJob.State.SUCCEEDED:
+                        job_result_json = json.loads(
+                            dataplex_v1.types.datascans.DataScanJob.to_json(job_result))
+                        if "dataQualityResult" in job_result_json:
+                            data_quality_results.append(job_result_json["dataQualityResult"])
+                        if "dataProfileResult" in job_result_json:
+                            data_profile_results.append(
+                                job_result_json["dataProfileResult"])
+            return {"data_profile": data_profile_results, "data_quality": data_quality_results}
+        except Exception as e:
+            logger.error("Exception {}.".format(e))
 
-    def _llm_inference(self,prompt):
+    def _llm_inference(self, prompt):
         try:
             vertexai.init(project=self._project_id, location=self._location)
             model = GenerativeModel(constants["LLM"]
@@ -174,7 +198,7 @@ class Client:
         except Exception as e:
             logger.error("Exception {}.".format(e))
 
-    def _update_table_description(self,table_fqn,description):
+    def _update_table_description(self, table_fqn, description):
         try:
             table = self._cloud_clients[constants["CLIENTS"]
                                     ["BIGQUERY"]].get_table(table_fqn)
@@ -182,7 +206,4 @@ class Client:
             _ = self._cloud_clients[constants["CLIENTS"]
                                     ["BIGQUERY"]].update_table(table, ["description"])
         except Exception as e:
-            logger.error("Exception {}.".format(e))    
-
-
-            
+            logger.error("Exception {}.".format(e))

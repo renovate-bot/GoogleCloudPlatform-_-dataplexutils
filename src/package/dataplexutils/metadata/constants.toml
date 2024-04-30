@@ -1,6 +1,7 @@
 [CLIENTS]
 BIGQUERY = "bigquery"
 DATAPLEX_DATA_SCAN = "dataplex_data_scan"
+DATA_CATALOG_LINEAGE = "data_catalog_lineage"
 [LOGGING]
 WIZARD_LOGGER = "wizard_logger"
 [LLM]
@@ -20,6 +21,8 @@ You need to produce metadata for a table.
 The table fully qualified name is  {}
 The table schema is {}
 A sample of the rows is {}
+The table profile information is {}
+The table quality information is {}
 Start with **Description** and then describe the contents and purpose of the table.
 Describe table contents, business area and how the table can be used.
 Do not include the description of the columns or data elements.
