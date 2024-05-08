@@ -44,25 +44,29 @@ class ClientOptions:
         use_lineage_processes=False,
         use_profile=False,
         use_data_quality=False,
+        use_ext_documents=False,
     ):
         self._use_lineage_tables = use_lineage_tables
         self._use_lineage_processes = use_lineage_processes
         self._use_profile = use_profile
         self._use_data_quality = use_data_quality
+        self._use_ext_documents = use_ext_documents
 
 
 class Client:
     """Represents the main metadata wizard client."""
 
     def __init__(
-        self, project_id: str, location: str, client_options: ClientOptions = None
+        self, project_id: str, model_location: str, dataplex_location: str,dataset_location: str, client_options: ClientOptions = None
     ):
         if client_options:
             self._client_options = client_options
         else:
             self._client_options = ClientOptions()
         self._project_id = project_id
-        self._location = location
+        self._dataplex_location = dataplex_location
+        self._dataset_location = dataset_location
+        self._model_location = model_location
         self._cloud_clients = {
             constants["CLIENTS"]["BIGQUERY"]: bigquery.Client(),
             constants["CLIENTS"][
@@ -86,11 +90,13 @@ class Client:
         Raises:
             NotFound: If the specified table does not exist.
         """
+        logger.info(f"Generating metadata for table {table_fqn}.")
         self._table_exists(table_fqn)
-        table_schema = self._get_table_schema(table_fqn)
+        table_schema_str,table_schema = self._get_table_schema(table_fqn)
         table_sample = self._get_table_sample(
             table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
         )
+        
         table_description_prompt = (
             constants["PROMPTS"]["SYSTEM_PROMPT"]
             + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT"]
@@ -114,19 +120,22 @@ class Client:
             job_sources_info = self._get_job_sources(table_fqn)
         else:
             job_sources_info = ""
+        
         table_description_prompt_expanded = table_description_prompt.format(
             table_fqn,
-            table_schema,
+            table_schema_str,
             table_sample,
             table_profile,
             table_quality,
             table_sources_info,
             job_sources_info,
         )
+        
         description = self._llm_inference(table_description_prompt_expanded)
-        self._update_table_description(table_fqn, description)
+        logger.info(f"Generated description: {description}.")
+        self._update_table_bq_description(table_fqn, description)
 
-    def generate_column_description(self, table_fqn: str) -> None:
+    def generate_column_descriptions(self, table_fqn: str) -> None:
         """Generates metadata on the columns.
 
         Args:
@@ -139,6 +148,51 @@ class Client:
         Raises:
             NotFound: If the specified table does not exist.
         """
+        logger.info(f"Generating metadata for columns in table {table_fqn}.")
+        self._table_exists(table_fqn)
+        table_schema_str,table_schema = self._get_table_schema(table_fqn)
+        table_sample = self._get_table_sample(
+            table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
+        )
+        
+        column_description_prompt = (
+            constants["PROMPTS"]["SYSTEM_PROMPT"]
+            + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT"]
+            + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
+        )
+        if self._client_options._use_data_quality:
+            table_profile_quality = self._get_table_profile_quality(table_fqn)
+            table_quality = table_profile_quality["data_quality"]
+        else:
+            table_quality = ""
+        if self._client_options._use_profile:
+            table_profile_quality = self._get_table_profile_quality(table_fqn)
+            table_profile = table_profile_quality["data_profile"]
+        else:
+            table_profile = ""
+        if self._client_options._use_lineage_tables:
+            table_sources_info = self._get_table_sources_info(table_fqn)
+        else:
+            table_sources_info = ""
+        if self._client_options._use_lineage_processes:
+            job_sources_info = self._get_job_sources(table_fqn)
+        else:
+            job_sources_info = ""
+        
+        for column in table_schema:
+            column_description_prompt_expanded = column_description_prompt.format(
+                column.name,
+                table_fqn,
+                table_schema_str,
+                table_sample,
+                table_profile,
+                table_quality,
+                table_sources_info,
+                job_sources_info,
+            )
+            column_description = self._llm_inference(column_description_prompt_expanded)
+            logger.info(f"Generated column description: {column_description}.")
+        #self._update_table_bq_description(table_fqn, description)
         pass
 
     def _table_exists(self, table_fqn: str) -> None:
@@ -167,7 +221,7 @@ class Client:
                 {"name": field.name, "type": field.field_type}
                 for field in schema_fields
             ]
-            return flattened_schema
+            return flattened_schema,table.schema
         except NotFound:
             logger.error(f"Table {table_fqn} is not found.")
             raise NotFound(message=f"Table {table_fqn} is not found.")
@@ -205,7 +259,7 @@ class Client:
                 constants["CLIENTS"]["DATAPLEX_DATA_SCAN"]
             ]
             data_scans = scan_client.list_data_scans(
-                parent=f"projects/{self._project_id}/locations/{self._location}"
+                parent=f"projects/{self._project_id}/locations/{self._dataplex_location}"
             )
             bq_resource_string = self._construct_bq_resource_string(table_fqn)
             scan_references = []
@@ -289,7 +343,7 @@ class Client:
             target = datacatalog_lineage_v1.EntityReference()
             target.fully_qualified_name = f"bigquery:{table_fqn}"
             request = datacatalog_lineage_v1.SearchLinksRequest(
-                parent=f"projects/{self._project_id}/locations/{self._location}",
+                parent=f"projects/{self._project_id}/locations/{self._dataplex_location}",
                 target=target,
             )
             link_results = lineage_client.search_links(request=request)
@@ -314,7 +368,7 @@ class Client:
             target = datacatalog_lineage_v1.EntityReference()
             target.fully_qualified_name = f"bigquery:{table_fqn}"
             request = datacatalog_lineage_v1.SearchLinksRequest(
-                parent=f"projects/{self._project_id}/locations/{self._location}",
+                parent=f"projects/{self._project_id}/locations/{self._dataset_location}",
                 target=target,
             )
             link_results = lineage_client.search_links(request=request)
@@ -323,7 +377,7 @@ class Client:
                 process.process
                 for process in lineage_client.batch_search_link_processes(
                     request=datacatalog_lineage_v1.BatchSearchLinkProcessesRequest(
-                        parent=f"projects/{self._project_id}/locations/{self._location}",
+                        parent=f"projects/{self._project_id}/locations/{self._dataset_location}",
                         links=links,
                     )
                 )
@@ -347,7 +401,7 @@ class Client:
         try:
             return (
                 self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
-                .get_job(bq_job_id, location=self._location)
+                .get_job(bq_job_id, location=self._dataset_location)
                 .query
             )
         except Exception as e:
@@ -356,7 +410,7 @@ class Client:
 
     def _llm_inference(self, prompt):
         try:
-            vertexai.init(project=self._project_id, location=self._location)
+            vertexai.init(project=self._project_id, location=self._model_location)
             model = GenerativeModel(constants["LLM"]["LLM_TYPE"])
             generation_config = GenerationConfig(
                 temperature=constants["LLM"]["TEMPERATURE"],
@@ -384,8 +438,10 @@ class Client:
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
+    
 
-    def _update_table_description(self, table_fqn, description):
+
+    def _update_table_bq_description(self, table_fqn, description):
         try:
             table = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(
                 table_fqn
