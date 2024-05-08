@@ -6,12 +6,12 @@ DATA_CATALOG_LINEAGE = "data_catalog_lineage"
 WIZARD_LOGGER = "wizard_logger"
 [LLM]
 LLM_TYPE = "gemini-1.0-pro"
-LLM_VISION_TYPE = "gemini-pro-vision"
+LLM_VISION_TYPE = "gemini-experimental"
 TEMPERATURE = 0.1
 TOP_P = 1.0
 TOP_K = 32
 CANDIDATE_COUNT = 1
-MAX_OUTPUT_TOKENS = 8192
+MAX_OUTPUT_TOKENS = 2048
 [PROMPTS]
 SYSTEM_PROMPT = """
 You are a data steward. Your task is to produce human meaningful metadata.

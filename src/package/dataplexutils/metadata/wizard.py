@@ -25,7 +25,7 @@ from google.cloud.dataplex_v1 import (
 from google.cloud import datacatalog_lineage_v1
 from google.cloud.dataplex_v1.types.datascans import DataScanJob
 from google.cloud.exceptions import NotFound
-from vertexai.generative_models import GenerationConfig, GenerativeModel
+from vertexai.generative_models import GenerationConfig, GenerativeModel, Part
 
 
 # Load constants
@@ -57,7 +57,8 @@ class Client:
     """Represents the main metadata wizard client."""
 
     def __init__(
-        self, project_id: str, model_location: str, dataplex_location: str,dataset_location: str, client_options: ClientOptions = None
+        self, project_id: str, model_location: str, dataplex_location: str, documentation_uri: str,
+            dataset_location: str, client_options: ClientOptions = None
     ):
         if client_options:
             self._client_options = client_options
@@ -67,6 +68,7 @@ class Client:
         self._dataplex_location = dataplex_location
         self._dataset_location = dataset_location
         self._model_location = model_location
+        self._documentation_uri = documentation_uri
         self._cloud_clients = {
             constants["CLIENTS"]["BIGQUERY"]: bigquery.Client(),
             constants["CLIENTS"][
@@ -429,19 +431,33 @@ class Client:
     def _llm_inference(self, prompt):
         try:
             vertexai.init(project=self._project_id, location=self._model_location)
-            model = GenerativeModel(constants["LLM"]["LLM_TYPE"])
+            if(self._client_options._use_ext_documents==True):
+
+                model = GenerativeModel(constants["LLM"]["LLM_VISION_TYPE"])
+            else:
+                model = GenerativeModel(constants["LLM"]["LLM_TYPE"])
+                
             generation_config = GenerationConfig(
                 temperature=constants["LLM"]["TEMPERATURE"],
                 top_p=constants["LLM"]["TOP_P"],
                 top_k=constants["LLM"]["TOP_K"],
                 candidate_count=constants["LLM"]["CANDIDATE_COUNT"],
                 max_output_tokens=constants["LLM"]["MAX_OUTPUT_TOKENS"],
+
             )
-            responses = model.generate_content(
-                prompt,
-                generation_config=generation_config,
-                stream=False,
-            )
+            if(self._client_options._use_ext_documents==True):
+                doc = Part.from_uri(self._documentation_uri,mime_type="application/pdf")
+                responses = model.generate_content(
+                    [doc,prompt],
+                    generation_config=generation_config,
+                    stream=False,
+                )
+            else:
+                responses = model.generate_content(
+                    prompt,
+                    generation_config=generation_config,
+                    stream=False,
+                )
             return responses.text
         except Exception as e:
             logger.error(f"Exception: {e}.")

@@ -126,3 +126,4 @@ dmypy.json
 src/backend_apis/*.tar.gz
 src/backend_apis/local_env
 notebooks/metadata_wizard_demo.ipynb
+tests/test_generate_table_prompt.py
