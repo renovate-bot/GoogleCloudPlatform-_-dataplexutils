@@ -136,6 +136,7 @@ class Client:
         self._update_table_bq_description(table_fqn, description)
 
     def generate_column_descriptions(self, table_fqn: str) -> None:
+        
         """Generates metadata on the columns.
 
         Args:
@@ -148,52 +149,69 @@ class Client:
         Raises:
             NotFound: If the specified table does not exist.
         """
-        logger.info(f"Generating metadata for columns in table {table_fqn}.")
-        self._table_exists(table_fqn)
-        table_schema_str,table_schema = self._get_table_schema(table_fqn)
-        table_sample = self._get_table_sample(
-            table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
-        )
-        
-        column_description_prompt = (
-            constants["PROMPTS"]["SYSTEM_PROMPT"]
-            + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT"]
-            + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
-        )
-        if self._client_options._use_data_quality:
-            table_profile_quality = self._get_table_profile_quality(table_fqn)
-            table_quality = table_profile_quality["data_quality"]
-        else:
-            table_quality = ""
-        if self._client_options._use_profile:
-            table_profile_quality = self._get_table_profile_quality(table_fqn)
-            table_profile = table_profile_quality["data_profile"]
-        else:
-            table_profile = ""
-        if self._client_options._use_lineage_tables:
-            table_sources_info = self._get_table_sources_info(table_fqn)
-        else:
-            table_sources_info = ""
-        if self._client_options._use_lineage_processes:
-            job_sources_info = self._get_job_sources(table_fqn)
-        else:
-            job_sources_info = ""
-        
-        for column in table_schema:
-            column_description_prompt_expanded = column_description_prompt.format(
-                column.name,
-                table_fqn,
-                table_schema_str,
-                table_sample,
-                table_profile,
-                table_quality,
-                table_sources_info,
-                job_sources_info,
+        try:
+            logger.info(f"Generating metadata for columns in table {table_fqn}.")
+            self._table_exists(table_fqn)
+            table_schema_str,table_schema = self._get_table_schema(table_fqn)
+            table_sample = self._get_table_sample(
+                table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
             )
-            column_description = self._llm_inference(column_description_prompt_expanded)
-            logger.info(f"Generated column description: {column_description}.")
-        #self._update_table_bq_description(table_fqn, description)
-        pass
+            
+            column_description_prompt = (
+                constants["PROMPTS"]["SYSTEM_PROMPT"]
+                + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT"]
+                + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
+            )
+            if self._client_options._use_data_quality:
+                table_profile_quality = self._get_table_profile_quality(table_fqn)
+                table_quality = table_profile_quality["data_quality"]
+            else:
+                table_quality = ""
+            if self._client_options._use_profile:
+                table_profile_quality = self._get_table_profile_quality(table_fqn)
+                table_profile = table_profile_quality["data_profile"]
+            else:
+                table_profile = ""
+            if self._client_options._use_lineage_tables:
+                table_sources_info = self._get_table_sources_info(table_fqn)
+            else:
+                table_sources_info = ""
+            if self._client_options._use_lineage_processes:
+                job_sources_info = self._get_job_sources(table_fqn)
+            else:
+                job_sources_info = ""
+            
+            new_schema = []
+            for column in table_schema:
+                column_description_prompt_expanded = column_description_prompt.format(
+                    column.name,
+                    table_fqn,
+                    table_schema_str,
+                    table_sample,
+                    table_profile,
+                    table_quality,
+                    table_sources_info,
+                    job_sources_info,
+                )
+                column_description = self._llm_inference(column_description_prompt_expanded)
+
+                new_column = bigquery.SchemaField(
+                    name=column.name,
+                    field_type=column.field_type,
+                    mode=column.mode,
+                    default_value_expression=column.default_value_expression,
+                    description= column_description[0:1024],
+                    fields = column.fields,
+                    policy_tags = column.policy_tags,
+                    precision = column.precision,
+                    max_length = column.max_length, 
+                    )
+                new_schema.append(new_column)
+                logger.info(f"Generated column description: {column_description}.")
+            self._update_table_schema(table_fqn, new_schema)
+        except Exception as e:
+            logger.error(f"Generation of column description table {table_fqn} failed.")
+            raise e(message=f"Generation of column description table {table_fqn} failed.")
 
     def _table_exists(self, table_fqn: str) -> None:
         """Checks if a specified BigQuery table exists.
@@ -209,7 +227,7 @@ class Client:
             self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(table_fqn)
         except NotFound:
             logger.error(f"Table {table_fqn} is not found.")
-            raise NotFound(message=f"Table {table_fqn} is not found.")
+            raise e
 
     def _get_table_schema(self, table_fqn):
         try:
@@ -453,3 +471,17 @@ class Client:
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
+    
+    def _update_table_schema(self, table_fqn, schema):
+        try:
+            table = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(
+                table_fqn
+            )
+            table.schema = schema
+            _ = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].update_table(
+                table, ["schema"]
+            )
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+

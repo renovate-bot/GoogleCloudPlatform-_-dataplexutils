@@ -41,8 +41,9 @@ TABLE_DOCUMENT_PROMPT = """
 The attached documents provide additional information about this table and the source tables. 
 """
 COLUMN_DESCRIPTION_PROMPT = """
-You need to produce metadata for a column of a table.
-The column name is {}
+You need to produce SHORT metadata in a form of description for a column of a table.
+Input data:
+The column that is described  is {}
 The table fully qualified name is  {}
 The table full schema is {}
 A sample of the rows is {}
@@ -51,9 +52,7 @@ The table quality information is {}
 Lineage information:
     The table is generated using the following tables {}
     The table is generated using the following queries {}
-Describe column contents, business area and how the table can be used.
-Do not include the description of the columns or data elements.
-Please also provide information how is that column calculated from originating columns or system, mention level of aggregation, Which tables are joined, what data is filterd, what are most sifgnificant data transformations.
+Describe only this column content. Please use approx 50 words only
 """
 
 [DATA]
