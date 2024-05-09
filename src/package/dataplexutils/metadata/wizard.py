@@ -94,11 +94,11 @@ class Client:
         """
         logger.info(f"Generating metadata for table {table_fqn}.")
         self._table_exists(table_fqn)
-        table_schema_str,table_schema = self._get_table_schema(table_fqn)
+        table_schema_str, table_schema = self._get_table_schema(table_fqn)
         table_sample = self._get_table_sample(
             table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
         )
-        
+
         table_description_prompt = (
             constants["PROMPTS"]["SYSTEM_PROMPT"]
             + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT"]
@@ -122,7 +122,7 @@ class Client:
             job_sources_info = self._get_job_sources(table_fqn)
         else:
             job_sources_info = ""
-        
+
         table_description_prompt_expanded = table_description_prompt.format(
             table_fqn,
             table_schema_str,
@@ -132,13 +132,13 @@ class Client:
             table_sources_info,
             job_sources_info,
         )
-        
+
         description = self._llm_inference(table_description_prompt_expanded)
         logger.info(f"Generated description: {description}.")
         self._update_table_bq_description(table_fqn, description)
 
-    def generate_column_descriptions(self, table_fqn: str) -> None:
-        
+    def generate_columns_descriptions(self, table_fqn: str) -> None:
+
         """Generates metadata on the columns.
 
         Args:
@@ -154,11 +154,11 @@ class Client:
         try:
             logger.info(f"Generating metadata for columns in table {table_fqn}.")
             self._table_exists(table_fqn)
-            table_schema_str,table_schema = self._get_table_schema(table_fqn)
+            table_schema_str, table_schema = self._get_table_schema(table_fqn)
             table_sample = self._get_table_sample(
                 table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
             )
-            
+
             column_description_prompt = (
                 constants["PROMPTS"]["SYSTEM_PROMPT"]
                 + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT"]
@@ -182,7 +182,7 @@ class Client:
                 job_sources_info = self._get_job_sources(table_fqn)
             else:
                 job_sources_info = ""
-            
+
             new_schema = []
             for column in table_schema:
                 column_description_prompt_expanded = column_description_prompt.format(
@@ -202,11 +202,11 @@ class Client:
                     field_type=column.field_type,
                     mode=column.mode,
                     default_value_expression=column.default_value_expression,
-                    description= column_description[0:1024],
-                    fields = column.fields,
-                    policy_tags = column.policy_tags,
-                    precision = column.precision,
-                    max_length = column.max_length, 
+                    description=column_description[0:1024],
+                    fields=column.fields,
+                    policy_tags=column.policy_tags,
+                    precision=column.precision,
+                    max_length=column.max_length
                     )
                 new_schema.append(new_column)
                 logger.info(f"Generated column description: {column_description}.")
@@ -229,9 +229,17 @@ class Client:
             self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(table_fqn)
         except NotFound:
             logger.error(f"Table {table_fqn} is not found.")
-            raise e
+            raise NotFound(message=f"Table {table_fqn} is not found.")
 
     def _get_table_schema(self, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             table = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(
                 table_fqn
@@ -241,12 +249,20 @@ class Client:
                 {"name": field.name, "type": field.field_type}
                 for field in schema_fields
             ]
-            return flattened_schema,table.schema
+            return flattened_schema, table.schema
         except NotFound:
             logger.error(f"Table {table_fqn} is not found.")
             raise NotFound(message=f"Table {table_fqn} is not found.")
 
     def _get_table_sample(self, table_fqn, num_rows_to_sample):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             bq_client = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
             query = f"SELECT * FROM {table_fqn} LIMIT {num_rows_to_sample}"
@@ -256,6 +272,14 @@ class Client:
             raise e
 
     def _split_table_fqn(self, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             pattern = r"^([^.]+)\.([^.]+)\.([^.]+)"
             match = re.search(pattern, table_fqn)
@@ -265,6 +289,14 @@ class Client:
             raise e
 
     def _construct_bq_resource_string(self, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
             return f"//bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
@@ -273,6 +305,14 @@ class Client:
             raise e
 
     def _get_table_scan_reference(self, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             scan_references = None
             scan_client = self._cloud_clients[
@@ -292,6 +332,14 @@ class Client:
             raise e
 
     def _get_table_profile_quality(self, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             scan_client = self._cloud_clients[
                 constants["CLIENTS"]["DATAPLEX_DATA_SCAN"]
@@ -334,6 +382,14 @@ class Client:
             raise e
 
     def _get_table_sources_info(self, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             table_sources_info = []
             table_sources = self._get_table_sources(table_fqn)
@@ -356,6 +412,14 @@ class Client:
             raise e
 
     def _get_table_sources(self, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             lineage_client = self._cloud_clients[
                 constants["CLIENTS"]["DATA_CATALOG_LINEAGE"]
@@ -379,6 +443,14 @@ class Client:
             raise e
 
     def _get_job_sources(self, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             lineage_client = datacatalog_lineage_v1.LineageClient()
             bq_process_sql = []
@@ -418,6 +490,14 @@ class Client:
             raise e
 
     def _bq_job_info(self, bq_job_id):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             return (
                 self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
@@ -431,12 +511,11 @@ class Client:
     def _llm_inference(self, prompt):
         try:
             vertexai.init(project=self._project_id, location=self._model_location)
-            if(self._client_options._use_ext_documents==True):
-
+            if self._client_options._use_ext_documents:
                 model = GenerativeModel(constants["LLM"]["LLM_VISION_TYPE"])
             else:
                 model = GenerativeModel(constants["LLM"]["LLM_TYPE"])
-                
+
             generation_config = GenerationConfig(
                 temperature=constants["LLM"]["TEMPERATURE"],
                 top_p=constants["LLM"]["TOP_P"],
@@ -445,10 +524,10 @@ class Client:
                 max_output_tokens=constants["LLM"]["MAX_OUTPUT_TOKENS"],
 
             )
-            if(self._client_options._use_ext_documents==True):
-                doc = Part.from_uri(self._documentation_uri,mime_type="application/pdf")
+            if self._client_options._use_ext_documents:
+                doc = Part.from_uri(self._documentation_uri, mime_type="application/pdf")
                 responses = model.generate_content(
-                    [doc,prompt],
+                    [doc, prompt],
                     generation_config=generation_config,
                     stream=False,
                 )
@@ -464,6 +543,14 @@ class Client:
             raise e
 
     def _get_table_description(self, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             table = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(
                 table_fqn
@@ -472,10 +559,16 @@ class Client:
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
-    
-
 
     def _update_table_bq_description(self, table_fqn, description):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             table = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(
                 table_fqn
@@ -487,8 +580,16 @@ class Client:
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
-    
+
     def _update_table_schema(self, table_fqn, schema):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
         try:
             table = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(
                 table_fqn
@@ -500,4 +601,3 @@ class Client:
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
-

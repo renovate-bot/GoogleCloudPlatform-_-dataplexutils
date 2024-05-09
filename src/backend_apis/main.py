@@ -48,3 +48,24 @@ def generate_table_description(
     )
     table_fqn = f"{table_settings.project_id}.{table_settings.dataset_id}.{table_settings.table_id}"
     client.generate_table_description(table_fqn)
+
+
+@app.get("/generate_columns_descriptions")
+def generate_columns_descriptions(
+    client_options_settings: ClientOptionsSettings,
+    client_settings: ClientSettings,
+    table_settings: TableSettings,
+):
+    client_options = ClientOptions(
+        client_options_settings.use_lineage_tables,
+        client_options_settings.use_lineage_processes,
+        client_options_settings.use_profile,
+        client_options_settings.use_data_quality,
+    )
+    client = Client(
+        project_id=client_settings.project_id,
+        location=client_settings.location,
+        client_options=client_options,
+    )
+    table_fqn = f"{table_settings.project_id}.{table_settings.dataset_id}.{table_settings.table_id}"
+    client.generate_columns_descriptions(table_fqn)
