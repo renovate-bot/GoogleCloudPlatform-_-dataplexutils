@@ -57,8 +57,9 @@ class Client:
     """Represents the main metadata wizard client."""
 
     def __init__(
-        self, project_id: str, model_location: str, dataplex_location: str, documentation_uri: str,
-            dataset_location: str, client_options: ClientOptions = None
+        self, project_id: str, llm_location: str, dataplex_location: str,
+        documentation_uri: str, dataset_location: str,
+        client_options: ClientOptions = None
     ):
         if client_options:
             self._client_options = client_options
@@ -67,8 +68,9 @@ class Client:
         self._project_id = project_id
         self._dataplex_location = dataplex_location
         self._dataset_location = dataset_location
-        self._model_location = model_location
+        self.llm_location = llm_location
         self._documentation_uri = documentation_uri
+
         self._cloud_clients = {
             constants["CLIENTS"]["BIGQUERY"]: bigquery.Client(),
             constants["CLIENTS"][
@@ -510,7 +512,7 @@ class Client:
 
     def _llm_inference(self, prompt):
         try:
-            vertexai.init(project=self._project_id, location=self._model_location)
+            vertexai.init(project=self._project_id, location=self.llm_location)
             if self._client_options._use_ext_documents:
                 model = GenerativeModel(constants["LLM"]["LLM_VISION_TYPE"])
             else:
