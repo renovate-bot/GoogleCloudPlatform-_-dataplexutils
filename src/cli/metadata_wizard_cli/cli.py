@@ -61,8 +61,6 @@ def _call_api(
             "table_id": table_id
         },
     }
-    print(url)
-    print(params)
     try:
         response = requests.post(url, json=params)  
         response.raise_for_status()  
