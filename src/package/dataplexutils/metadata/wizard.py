@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+# pylint: disable=line-too-long
+# !/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 """Dataplex Utils Metadata Wizard main logic
@@ -12,6 +13,7 @@ import toml
 import pkgutil
 import re
 import json
+from enum import Enum
 
 # Cloud imports
 import vertexai
@@ -33,6 +35,128 @@ constants = toml.loads(pkgutil.get_data(__name__, "constants.toml").decode())
 # Logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(constants["LOGGING"]["WIZARD_LOGGER"])
+
+
+class PromtType(Enum):
+    PROMPT_TYPE_TABLE = 0
+    PROMPT_TYPE_COLUMN = 1
+
+
+class PromptManager:
+    """Represents a prompt manager."""
+
+    def __init__(self, prompt_type, client_options):
+        self._prompt_type = prompt_type
+        self._client_options = client_options
+
+    def get_promtp(self):
+        try:
+            if self._prompt_type == PromtType.PROMPT_TYPE_TABLE:
+                return self._get_prompt_table()
+            elif self._prompt_type == PromtType.PROMPT_TYPE_COLUMN:
+                return self._get_prompt_columns()
+            else:
+                return None
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def _get_prompt_table(self):
+        try:
+            # System
+            table_description_prompt = constants["PROMPTS"]["SYSTEM_PROMPT"]
+            # Base
+            table_description_prompt = (
+                table_description_prompt
+                + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_BASE"]
+            )
+            # Additional metadata information
+            if self._client_options._use_profile:
+                table_description_prompt = (
+                    table_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_PROFILE"]
+                )
+            if self._client_options._use_data_quality:
+                table_description_prompt = (
+                    table_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_QUALITY"]
+                )
+            if self._client_options._use_lineage_tables:
+                table_description_prompt = (
+                    table_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_LINEAGE_TABLES"]
+                )
+            if self._client_options._use_lineage_processes:
+                table_description_prompt = (
+                    table_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_LINEAGE_PROCESSES"]
+                )
+            if self._client_options._use_ext_documents:
+                table_description_prompt = (
+                    table_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_DOCUMENT"]
+                )
+            # Generation base
+            table_description_prompt = (
+                table_description_prompt
+                + constants["PROMPTS"]["TABLE_DESCRIPTION_GENERATION_BASE"]
+            )
+            # Generation with additional information
+            if (
+                self._client_options._use_lineage_tables
+                or self._client_options._use_lineage_processes
+            ):
+                table_description_prompt = (
+                    table_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_GENERATION_LINEAGE"]
+                )
+            # Output format
+            table_description_prompt = (
+                table_description_prompt + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
+            )
+            return table_description_prompt
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def _get_prompt_columns(self):
+        try:
+            # System
+            column_description_prompt = constants["PROMPTS"]["SYSTEM_PROMPT"]
+            # Base
+            column_description_prompt = (
+                column_description_prompt
+                + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_BASE"]
+            )
+            # Additional metadata information
+            if self._client_options._use_profile:
+                column_description_prompt = (
+                    column_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_PROFILE"]
+                )
+            if self._client_options._use_data_quality:
+                column_description_prompt = (
+                    column_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_QUALITY"]
+                )
+            if self._client_options._use_lineage_tables:
+                column_description_prompt = (
+                    column_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_LINEAGE_TABLES"]
+                )
+            if self._client_options._use_lineage_processes:
+                column_description_prompt = (
+                    column_description_prompt
+                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_LINEAGE_PROCESSES"]
+                )
+            # Output format
+            column_description_prompt = (
+                column_description_prompt + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
+            )
+            return column_description_prompt
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
 
 
 class ClientOptions:
@@ -62,7 +186,7 @@ class Client:
         llm_location: str,
         dataplex_location: str,
         documentation_uri: str,
-        client_options: ClientOptions = None
+        client_options: ClientOptions = None,
     ):
         if client_options:
             self._client_options = client_options
@@ -83,7 +207,7 @@ class Client:
             ]: datacatalog_lineage_v1.LineageClient(),
         }
 
-    def generate_table_description(self, table_fqn: str) -> None:
+    def generate_table_description(self, table_fqn):
         """Generates metadata on the tabes.
 
         Args:
@@ -98,51 +222,46 @@ class Client:
         """
         logger.info(f"Generating metadata for table {table_fqn}.")
         self._table_exists(table_fqn)
-        table_schema_str, table_schema = self._get_table_schema(table_fqn)
+        # Get base information
+        table_schema_str, _ = self._get_table_schema(table_fqn)
         table_sample = self._get_table_sample(
             table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
         )
-
-        table_description_prompt = (
-            constants["PROMPTS"]["SYSTEM_PROMPT"]
-            + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT"]
-            + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
+        # Get additional information
+        table_quality = self._get_table_quality(
+            self._client_options._use_data_quality, table_fqn
         )
-        if self._client_options._use_data_quality:
-            table_profile_quality = self._get_table_profile_quality(table_fqn)
-            table_quality = table_profile_quality["data_quality"]
-        else:
-            table_quality = ""
-        if self._client_options._use_profile:
-            table_profile_quality = self._get_table_profile_quality(table_fqn)
-            table_profile = table_profile_quality["data_profile"]
-        else:
-            table_profile = ""
-        if self._client_options._use_lineage_tables:
-            table_sources_info = self._get_table_sources_info(table_fqn)
-        else:
-            table_sources_info = ""
-        if self._client_options._use_lineage_processes:
-            job_sources_info = self._get_job_sources(table_fqn)
-        else:
-            job_sources_info = ""
-
+        table_profile = self._get_table_profile(
+            self._client_options._use_profile, table_fqn
+        )
+        table_sources_info = self._get_table_sources_info(
+            self._client_options._use_lineage_tables, table_fqn
+        )
+        job_sources_info = self._get_job_sources(
+            self._client_options._use_lineage_processes, table_fqn
+        )
+        prompt_manager = PromptManager(
+            PromtType.PROMPT_TYPE_TABLE, self._client_options
+        )
+        # Get prompt
+        table_description_prompt = prompt_manager.get_promtp()
+        # Format prompt
         table_description_prompt_expanded = table_description_prompt.format(
-            table_fqn,
-            table_schema_str,
-            table_sample,
-            table_profile,
-            table_quality,
-            table_sources_info,
-            job_sources_info,
+            table_fqn=table_fqn,
+            table_schema_str=table_schema_str,
+            table_sample=table_sample,
+            table_profile=table_profile,
+            table_quality=table_quality,
+            table_sources_info=table_sources_info,
+            job_sources_info=job_sources_info,
         )
+        logger.info(f"Prompt used is: {table_description_prompt_expanded}.")
+        table_description = self._llm_inference(table_description_prompt_expanded)
+        logger.info(f"Generated description: {table_description}.")
+        # Update table
+        self._update_table_bq_description(table_fqn, table_description)
 
-        description = self._llm_inference(table_description_prompt_expanded)
-        logger.info(f"Generated description: {description}.")
-        self._update_table_bq_description(table_fqn, description)
-
-    def generate_columns_descriptions(self, table_fqn: str) -> None:
-
+    def generate_columns_descriptions(self, table_fqn):
         """Generates metadata on the columns.
 
         Args:
@@ -163,61 +282,74 @@ class Client:
                 table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
             )
 
-            column_description_prompt = (
-                constants["PROMPTS"]["SYSTEM_PROMPT"]
-                + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT"]
-                + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
+            # Get additional information
+            table_quality = self._get_table_quality(
+                self._client_options._use_data_quality, table_fqn
             )
-            if self._client_options._use_data_quality:
-                table_profile_quality = self._get_table_profile_quality(table_fqn)
-                table_quality = table_profile_quality["data_quality"]
-            else:
-                table_quality = ""
-            if self._client_options._use_profile:
-                table_profile_quality = self._get_table_profile_quality(table_fqn)
-                table_profile = table_profile_quality["data_profile"]
-            else:
-                table_profile = ""
-            if self._client_options._use_lineage_tables:
-                table_sources_info = self._get_table_sources_info(table_fqn)
-            else:
-                table_sources_info = ""
-            if self._client_options._use_lineage_processes:
-                job_sources_info = self._get_job_sources(table_fqn)
-            else:
-                job_sources_info = ""
-
-            new_schema = []
+            table_profile = self._get_table_profile(
+                self._client_options._use_profile, table_fqn
+            )
+            table_sources_info = self._get_table_sources_info(
+                self._client_options._use_lineage_tables, table_fqn
+            )
+            job_sources_info = self._get_job_sources(
+                self._client_options._use_lineage_processes, table_fqn
+            )
+            prompt_manager = PromptManager(
+                PromtType.PROMPT_TYPE_TABLE, self._client_options
+            )
+            # Get prompt
+            prompt_manager = PromptManager(
+                PromtType.PROMPT_TYPE_COLUMN, self._client_options
+            )
+            column_description_prompt = prompt_manager.get_promtp()
+            # We need to generate a new schema with the updated column
+            # descriptions and then swap it
+            updated_schema = []
             for column in table_schema:
                 column_description_prompt_expanded = column_description_prompt.format(
-                    column.name,
-                    table_fqn,
-                    table_schema_str,
-                    table_sample,
-                    table_profile,
-                    table_quality,
-                    table_sources_info,
-                    job_sources_info,
+                    column_name=column.name,
+                    table_fqn=table_fqn,
+                    table_schema_str=table_schema_str,
+                    table_sample=table_sample,
+                    table_profile=table_profile,
+                    table_quality=table_quality,
+                    table_sources_info=table_sources_info,
+                    job_sources_info=job_sources_info,
                 )
-                column_description = self._llm_inference(column_description_prompt_expanded)
-
-                new_column = bigquery.SchemaField(
-                    name=column.name,
-                    field_type=column.field_type,
-                    mode=column.mode,
-                    default_value_expression=column.default_value_expression,
-                    description=column_description[0:1024],
-                    fields=column.fields,
-                    policy_tags=column.policy_tags,
-                    precision=column.precision,
-                    max_length=column.max_length
-                    )
-                new_schema.append(new_column)
+                logger.info(f"Prompt used is: {column_description_prompt_expanded}.")
+                column_description = self._llm_inference(
+                    column_description_prompt_expanded
+                )
+                updated_schema.append(
+                    self._get_updated_column(column, column_description)
+                )
                 logger.info(f"Generated column description: {column_description}.")
-            self._update_table_schema(table_fqn, new_schema)
+            self._update_table_schema(table_fqn, updated_schema)
         except Exception as e:
             logger.error(f"Generation of column description table {table_fqn} failed.")
-            raise e(message=f"Generation of column description table {table_fqn} failed.")
+            raise e(
+                message=f"Generation of column description table {table_fqn} failed."
+            )
+
+    def _get_updated_column(self, column, column_description):
+        try:
+            return bigquery.SchemaField(
+                name=column.name,
+                field_type=column.field_type,
+                mode=column.mode,
+                default_value_expression=column.default_value_expression,
+                description=column_description[
+                    0 : constants["DATA"]["MAX_COLUMN_DESC_LENGTH"]
+                ],
+                fields=column.fields,
+                policy_tags=column.policy_tags,
+                precision=column.precision,
+                max_length=column.max_length,
+            )
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
 
     def _table_exists(self, table_fqn: str) -> None:
         """Checks if a specified BigQuery table exists.
@@ -335,57 +467,30 @@ class Client:
             logger.error(f"Exception: {e}.")
             raise e
 
-    def _get_table_profile_quality(self, table_fqn):
-        """Add stringdocs
-
-        Args:
-            Add stringdocs
-
-        Raises:
-            Add stringdocs
-        """
+    def _get_table_profile(self, use_enabled, table_fqn):
         try:
-            scan_client = self._cloud_clients[
-                constants["CLIENTS"]["DATAPLEX_DATA_SCAN"]
-            ]
-            data_profile_results = []
-            data_quality_results = []
-            table_scan_references = self._get_table_scan_reference(table_fqn)
-            for table_scan_reference in table_scan_references:
-                if table_scan_reference:
-                    for job in scan_client.list_data_scan_jobs(
-                        ListDataScanJobsRequest(
-                            parent=scan_client.get_data_scan(
-                                GetDataScanRequest(name=table_scan_reference)
-                            ).name
-                        )
-                    ):
-                        job_result = scan_client.get_data_scan_job(
-                            request=GetDataScanJobRequest(name=job.name, view="FULL")
-                        )
-                        if job_result.state == DataScanJob.State.SUCCEEDED:
-                            job_result_json = json.loads(
-                                dataplex_v1.types.datascans.DataScanJob.to_json(
-                                    job_result
-                                )
-                            )
-                            if "dataQualityResult" in job_result_json:
-                                data_quality_results.append(
-                                    job_result_json["dataQualityResult"]
-                                )
-                            if "dataProfileResult" in job_result_json:
-                                data_profile_results.append(
-                                    job_result_json["dataProfileResult"]
-                                )
-            return {
-                "data_profile": data_profile_results,
-                "data_quality": data_quality_results,
-            }
+            table_profile = self._get_table_profile_quality(use_enabled, table_fqn)["data_profile"]
+            if not table_profile:
+                self._client_options._use_profile = False
+            return table_profile
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
 
-    def _get_table_sources_info(self, table_fqn):
+    def _get_table_quality(self, use_enabled, table_fqn):
+        try:
+            table_quality = self._get_table_profile_quality(use_enabled, table_fqn)["data_quality"]
+            # If the user is requesting to use data quality but there is
+            # not data quality information to return, we disable the client
+            # options flag so the prompt do not include this.
+            if not table_quality:
+                self._client_options._use_data_quality = False
+            return table_quality
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def _get_table_profile_quality(self, use_enabled, table_fqn):
         """Add stringdocs
 
         Args:
@@ -395,22 +500,85 @@ class Client:
             Add stringdocs
         """
         try:
-            table_sources_info = []
-            table_sources = self._get_table_sources(table_fqn)
-            for table_source in table_sources:
-                table_sources_info.append(
-                    {
-                        "source_table_name": table_source,
-                        "source_table_schema": self._get_table_schema(table_source),
-                        "source_table_description": self._get_table_description(
-                            table_source
-                        ),
-                        "source_table_sample": self._get_table_sample(
-                            table_source, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
-                        ),
-                    }
-                )
-            return table_sources_info
+            if use_enabled:
+                scan_client = self._cloud_clients[
+                    constants["CLIENTS"]["DATAPLEX_DATA_SCAN"]
+                ]
+                data_profile_results = []
+                data_quality_results = []
+                table_scan_references = self._get_table_scan_reference(table_fqn)
+                for table_scan_reference in table_scan_references:
+                    if table_scan_reference:
+                        for job in scan_client.list_data_scan_jobs(
+                            ListDataScanJobsRequest(
+                                parent=scan_client.get_data_scan(
+                                    GetDataScanRequest(name=table_scan_reference)
+                                ).name
+                            )
+                        ):
+                            job_result = scan_client.get_data_scan_job(
+                                request=GetDataScanJobRequest(
+                                    name=job.name, view="FULL"
+                                )
+                            )
+                            if job_result.state == DataScanJob.State.SUCCEEDED:
+                                job_result_json = json.loads(
+                                    dataplex_v1.types.datascans.DataScanJob.to_json(
+                                        job_result
+                                    )
+                                )
+                                if "dataQualityResult" in job_result_json:
+                                    data_quality_results.append(
+                                        job_result_json["dataQualityResult"]
+                                    )
+                                if "dataProfileResult" in job_result_json:
+                                    data_profile_results.append(
+                                        job_result_json["dataProfileResult"]
+                                    )
+                return {
+                    "data_profile": data_profile_results,
+                    "data_quality": data_quality_results,
+                }
+            else:
+                return {
+                    "data_profile": [],
+                    "data_quality": [],
+                }
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def _get_table_sources_info(self, use_enabled, table_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
+        try:
+            if use_enabled:
+                table_sources_info = []
+                table_sources = self._get_table_sources(table_fqn)
+                for table_source in table_sources:
+                    table_sources_info.append(
+                        {
+                            "source_table_name": table_source,
+                            "source_table_schema": self._get_table_schema(table_source),
+                            "source_table_description": self._get_table_description(
+                                table_source
+                            ),
+                            "source_table_sample": self._get_table_sample(
+                                table_source, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
+                            ),
+                        }
+                    )
+                if not table_sources_info:
+                    self._client_options._use_lineage_tables = False
+                return table_sources_info
+            else:
+                return []
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
@@ -446,7 +614,16 @@ class Client:
             logger.error(f"Exception: {e}.")
             raise e
 
-    def _get_job_sources(self, table_fqn):
+    def _get_dataset_location(self, table_fqn):
+        try:
+            bq_client = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
+            project_id, dataset_id, _ = self._split_table_fqn(table_fqn)
+            return bq_client.get_dataset(f"{project_id}.{dataset_id}").location
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def _get_job_sources(self, use_enabled, table_fqn):
         """Add stringdocs
 
         Args:
@@ -456,43 +633,51 @@ class Client:
             Add stringdocs
         """
         try:
-            lineage_client = datacatalog_lineage_v1.LineageClient()
-            bq_process_sql = []
-            lineage_client = self._cloud_clients[
-                constants["CLIENTS"]["DATA_CATALOG_LINEAGE"]
-            ]
-            target = datacatalog_lineage_v1.EntityReference()
-            target.fully_qualified_name = f"bigquery:{table_fqn}"
-            _, dataset_location, _ = self._split_table_fqn(table_fqn)
-            request = datacatalog_lineage_v1.SearchLinksRequest(
-                parent=f"projects/{self._project_id}/locations/{dataset_location}",
-                target=target,
-            )
-            link_results = lineage_client.search_links(request=request)
-            links = [link.name for link in link_results]
-            lineage_processes_ids = [
-                process.process
-                for process in lineage_client.batch_search_link_processes(
-                    request=datacatalog_lineage_v1.BatchSearchLinkProcessesRequest(
-                        parent=f"projects/{self._project_id}/locations/{dataset_location}",
-                        links=links,
-                    )
+            if use_enabled:
+                bq_process_sql = []
+                lineage_client = self._cloud_clients[
+                    constants["CLIENTS"]["DATA_CATALOG_LINEAGE"]
+                ]
+                target = datacatalog_lineage_v1.EntityReference()
+                target.fully_qualified_name = f"bigquery:{table_fqn}"
+                dataset_location = self._get_dataset_location(table_fqn)
+                request = datacatalog_lineage_v1.SearchLinksRequest(
+                    parent=f"projects/{self._project_id}/locations/{dataset_location}",
+                    target=target,
                 )
-            ]
-            for process_id in lineage_processes_ids:
-                process_details = lineage_client.get_process(
-                    request=datacatalog_lineage_v1.GetProcessRequest(
-                        name=process_id,
-                    )
-                )
-                if "bigquery_job_id" in process_details.attributes:
-                    bq_process_sql.append(
-                        self._bq_job_info(
-                            process_details.attributes["bigquery_job_id"],
-                            dataset_location,
+                link_results = lineage_client.search_links(request=request)
+                if len(link_results.links) > 0:
+                    links = [link.name for link in link_results]
+                    lineage_processes_ids = [
+                        process.process
+                        for process in lineage_client.batch_search_link_processes(
+                            request=datacatalog_lineage_v1.BatchSearchLinkProcessesRequest(
+                                parent=f"projects/{self._project_id}/locations/{dataset_location}",
+                                links=links,
+                            )
                         )
-                    )
-            return bq_process_sql
+                    ]
+                    for process_id in lineage_processes_ids:
+                        process_details = lineage_client.get_process(
+                            request=datacatalog_lineage_v1.GetProcessRequest(
+                                name=process_id,
+                            )
+                        )
+                        if "bigquery_job_id" in process_details.attributes:
+                            bq_process_sql.append(
+                                self._bq_job_info(
+                                    process_details.attributes["bigquery_job_id"],
+                                    dataset_location,
+                                )
+                            )
+                    if not bq_process_sql:
+                        self._client_options._use_lineage_processes = False
+                    return bq_process_sql
+                else:
+                    self._client_options._use_lineage_processes = False
+                    return []
+            else:
+                return []
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
@@ -530,10 +715,11 @@ class Client:
                 top_k=constants["LLM"]["TOP_K"],
                 candidate_count=constants["LLM"]["CANDIDATE_COUNT"],
                 max_output_tokens=constants["LLM"]["MAX_OUTPUT_TOKENS"],
-
             )
             if self._client_options._use_ext_documents:
-                doc = Part.from_uri(self._documentation_uri, mime_type="application/pdf")
+                doc = Part.from_uri(
+                    self._documentation_uri, mime_type=constants["DATA"]["PDF_MIME_TYPE"]
+                )
                 responses = model.generate_content(
                     [doc, prompt],
                     generation_config=generation_config,

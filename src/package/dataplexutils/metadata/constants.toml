@@ -5,9 +5,9 @@ DATA_CATALOG_LINEAGE = "data_catalog_lineage"
 [LOGGING]
 WIZARD_LOGGER = "wizard_logger"
 [LLM]
-LLM_TYPE = "gemini-1.0-pro"
+LLM_TYPE = "gemini-1.5-flash-preview-0514"
 LLM_VISION_TYPE = "gemini-experimental"
-TEMPERATURE = 0.1
+TEMPERATURE = 0.0
 TOP_P = 1.0
 TOP_K = 32
 CANDIDATE_COUNT = 1
@@ -15,45 +15,56 @@ MAX_OUTPUT_TOKENS = 2048
 [PROMPTS]
 SYSTEM_PROMPT = """
 You are a data steward. Your task is to produce human meaningful metadata.
-
 """
-TABLE_DESCRIPTION_PROMPT = """
+TABLE_DESCRIPTION_PROMPT_BASE = """
 You need to produce metadata for a table.
-The table fully qualified name is  {}
-The table schema is {}
-A sample of the rows is {}
-The table profile information is {}
-The table quality information is {}
+The table fully qualified name is  {table_fqn}
+The table schema is {table_schema_str}
+A sample of the rows is {table_sample}
+"""
+TABLE_DESCRIPTION_PROMPT_PROFILE = """
+The table profile information is {table_profile}
+"""
+TABLE_DESCRIPTION_PROMPT_QUALITY = """
+The table quality information is {table_quality}
+"""
+TABLE_DESCRIPTION_PROMPT_LINEAGE_TABLES = """
 Lineage information:
-    The table is generated using the following tables {}
-    The table is generated using the following queries {}
-Produce two paragraphs:
+    The table is generated using the following tables {table_sources_info}
+    Produce two paragraphs:
+"""
+TABLE_DESCRIPTION_PROMPT_LINEAGE_PROCESSES = """
+Lineage information:
+    The table is generated using the following queries {job_sources_info}
+    Produce two paragraphs:
+"""
+TABLE_DESCRIPTION_PROMPT_DOCUMENT = """
+The attached documents provide additional information about this table and the source tables. 
+"""
+TABLE_DESCRIPTION_GENERATION_BASE = """
 The first paragraph starts with **Description** and then describe the contents and purpose of the table.
 Describe table contents, business area and how the table can be used.
 Do not include the description of the columns or data elements.
-The first paragraph starts with **Source** and provide information how is that table is calculated from originating tables, mentiones level of aggregation, Which tables are joined, what data is filterd, what are most sifgnificant data transformations. If there's no lineage information then second paragraph is ommited.
+Do not base the description just on the provided table sample.
+"""
+TABLE_DESCRIPTION_GENERATION_LINEAGE = """
+The second paragraph starts with **Source** and provide information how is that table is calculated from originating tables, mentiones level of aggregation,
+which tables are joined, what data is filterd, what are most sifgnificant data transformations.
+If there's no lineage information then second paragraph is ommited.
 """
 OUTPUT_FORMAT_PROMPT = """
 Do not use markdown, or do not the keywords like SQL at the beginning of answer, do not use quotes to enclose the response.
-
 """
-TABLE_DOCUMENT_PROMPT = """
-The attached documents provide additional information about this table and the source tables. 
-"""
-COLUMN_DESCRIPTION_PROMPT = """
-You need to produce SHORT metadata in a form of description for a column of a table.
+COLUMN_DESCRIPTION_PROMPT_BASE = """
+You need to produce short metadata in a form of description for a column of a table.
 Input data:
-The column that is described  is {}
-The table fully qualified name is  {}
-The table full schema is {}
-A sample of the rows is {}
-The table profile information is {}
-The table quality information is {}
-Lineage information:
-    The table is generated using the following tables {}
-    The table is generated using the following queries {}
+The column that is described  is {column_name}
+The table fully qualified name is  {table_fqn}
+The table full schema is {table_schema_str}
+A sample of the rows is {table_sample}
 Describe only this column content. Please use approx 50 words only
 """
-
 [DATA]
 NUM_ROWS_TO_SAMPLE = 10
+MAX_COLUMN_DESC_LENGTH = 1024
+PDF_MIME_TYPE = "application/pdf"
