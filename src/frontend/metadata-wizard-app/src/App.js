@@ -20,7 +20,6 @@ function App() {
       llm_location: '',
       dataplex_location: '',
       documentation_uri: ''
-
     },
     table_settings: {
       project_id: '',
@@ -29,25 +28,31 @@ function App() {
     },
   });
 
+  const [apiUrlBase, setApiUrlBase] = useState(null);
   const [apiResponse, setApiResponse] = useState(null);
 
   const handleChange = (event) => {
     const { name, value, type, checked } = event.target;
-    const [parent, child] = name.split('.');
 
-    setParams((prevParams) => ({
-      ...prevParams,
-      [parent]: {
-        ...prevParams[parent],
-        [child]: type === 'checkbox' ? checked : value,
-      },
-    }));
+    if (name === "apiUrlBase") {
+      setApiUrlBase(value);
+    } else {
+      const [parent, child] = name.split('.');
+
+      setParams((prevParams) => ({
+        ...prevParams,
+        [parent]: {
+          ...prevParams[parent],
+          [child]: type === 'checkbox' ? checked : value,
+        },
+      }));
+    }
   };
 
   const callApi = async (endpoint) => {
     try {
       const response = await axios.post(
-        `https://metadata-wizard-vc76aeajhq-uc.a.run.app/${endpoint}`,
+        `${apiUrlBase}/${endpoint}`,
         params
       );
       setApiResponse(response.data);
@@ -200,6 +205,18 @@ function App() {
           </div>
         </Box>
 
+        <Box className="settings-section">
+          <h2>API backend URL</h2>
+          <div>
+            <TextField
+              label="API Base URL"
+              name="apiUrlBase"
+              value={apiUrlBase}
+              onChange={handleChange}
+              fullWidth
+            />
+          </div>
+        </Box>
       </Box>
 
       <Box >
