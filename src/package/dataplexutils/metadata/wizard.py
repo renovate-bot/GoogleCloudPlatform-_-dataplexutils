@@ -57,8 +57,11 @@ class Client:
     """Represents the main metadata wizard client."""
 
     def __init__(
-        self, project_id: str, llm_location: str, dataplex_location: str,
-        documentation_uri: str, dataset_location: str,
+        self,
+        project_id: str,
+        llm_location: str,
+        dataplex_location: str,
+        documentation_uri: str,
         client_options: ClientOptions = None
     ):
         if client_options:
@@ -67,7 +70,6 @@ class Client:
             self._client_options = ClientOptions()
         self._project_id = project_id
         self._dataplex_location = dataplex_location
-        self._dataset_location = dataset_location
         self.llm_location = llm_location
         self._documentation_uri = documentation_uri
 
@@ -461,8 +463,9 @@ class Client:
             ]
             target = datacatalog_lineage_v1.EntityReference()
             target.fully_qualified_name = f"bigquery:{table_fqn}"
+            _, dataset_location, _ = self._split_table_fqn(table_fqn)
             request = datacatalog_lineage_v1.SearchLinksRequest(
-                parent=f"projects/{self._project_id}/locations/{self._dataset_location}",
+                parent=f"projects/{self._project_id}/locations/{dataset_location}",
                 target=target,
             )
             link_results = lineage_client.search_links(request=request)
@@ -471,7 +474,7 @@ class Client:
                 process.process
                 for process in lineage_client.batch_search_link_processes(
                     request=datacatalog_lineage_v1.BatchSearchLinkProcessesRequest(
-                        parent=f"projects/{self._project_id}/locations/{self._dataset_location}",
+                        parent=f"projects/{self._project_id}/locations/{dataset_location}",
                         links=links,
                     )
                 )
@@ -484,14 +487,17 @@ class Client:
                 )
                 if "bigquery_job_id" in process_details.attributes:
                     bq_process_sql.append(
-                        self._bq_job_info(process_details.attributes["bigquery_job_id"])
+                        self._bq_job_info(
+                            process_details.attributes["bigquery_job_id"],
+                            dataset_location,
+                        )
                     )
             return bq_process_sql
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
 
-    def _bq_job_info(self, bq_job_id):
+    def _bq_job_info(self, bq_job_id, dataset_location):
         """Add stringdocs
 
         Args:
@@ -503,7 +509,7 @@ class Client:
         try:
             return (
                 self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
-                .get_job(bq_job_id, location=self._dataset_location)
+                .get_job(bq_job_id, location=dataset_location)
                 .query
             )
         except Exception as e:

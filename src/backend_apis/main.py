@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Body, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 import dataplexutils.metadata.wizard as mw
 from dataplexutils.metadata.wizard import Client, ClientOptions
 from pydantic import BaseModel
@@ -19,13 +20,22 @@ class ClientSettings(BaseModel):
     llm_location: str
     dataplex_location: str
     documentation_uri: str
-    dataset_location: str
 
 
 class TableSettings(BaseModel):
     project_id: str
     dataset_id: str
     table_id: str
+
+
+app.add_middleware(
+    CORSMiddleware,
+    # @velascoluis - This is for the local frontend
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/version")
@@ -66,7 +76,6 @@ def generate_table_description(
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
             documentation_uri=client_settings.documentation_uri,
-            dataset_location=client_settings.dataset_location,
             client_options=client_options,
         )
 
@@ -101,7 +110,6 @@ def generate_columns_descriptions(
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
             documentation_uri=client_settings.documentation_uri,
-            dataset_location=client_settings.dataset_location,
             client_options=client_options,
         )
 

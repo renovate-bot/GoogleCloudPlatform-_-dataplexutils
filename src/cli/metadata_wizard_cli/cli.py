@@ -22,7 +22,6 @@ def _call_api(
     llm_location,
     dataplex_location,
     documentation_uri,
-    dataset_location,
     table_project_id,
     table_dataset_id,
     table_id,
@@ -52,8 +51,7 @@ def _call_api(
             "project_id": dataplex_project_id,
             "llm_location": llm_location,
             "dataplex_location": dataplex_location,
-            "documentation_uri": documentation_uri,
-            "dataset_location": dataset_location,
+            "documentation_uri": documentation_uri
         },
         "table_settings": {
             "project_id": table_project_id,
@@ -62,7 +60,7 @@ def _call_api(
         },
     }
     try:
-        response = requests.post(url, json=params)  
+        response = requests.post(url, json=params) 
         response.raise_for_status()  
         print(response.json())
     except requests.exceptions.RequestException as e:
@@ -145,12 +143,6 @@ def _get_input_arguments():
         type=str
     )
     parser.add_argument(
-        "--dataset_location",
-        dest="dataset_location",
-        required=True,
-        type=str
-    )
-    parser.add_argument(
         "--table_project_id",
         dest="table_project_id",
         required=True,
@@ -191,7 +183,6 @@ def main():
     llm_location = args.llm_location
     dataplex_location = args.dataplex_location
     documentation_uri = args.documentation_uri
-    dataset_location = args.dataset_location
     table_project_id = args.table_project_id
     table_dataset_id = args.table_dataset_id
     table_id = args.table_id
@@ -208,7 +199,6 @@ def main():
         llm_location,
         dataplex_location,
         documentation_uri,
-        dataset_location,
         table_project_id,
         table_dataset_id,
         table_id,

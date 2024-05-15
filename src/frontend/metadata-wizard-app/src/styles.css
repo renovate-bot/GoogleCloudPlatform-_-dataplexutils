@@ -1,0 +1,100 @@
+/* General Styling */
+body {
+    font-family: 'Roboto', sans-serif;
+    background-color: #f5f5f5;
+}
+
+.container {
+    max-width: 960px;
+    margin: 24px auto;
+    padding: 24px;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    display: flex; 
+    flex-direction: column;  
+    align-items: center;
+    text-align: center; 
+}
+
+.title { 
+    font-size: 24px;
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 24px;
+}
+
+/* Settings Sections */
+.settings-sections-container { 
+    display: flex;
+    justify-content: space-between;
+    width: 100%; 
+    flex-wrap: wrap;
+}
+
+.settings-section {
+    margin-bottom: 24px;
+    padding: 20px;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    background-color: #fff;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    flex: 1 1 28%; 
+    margin: 0 1%;
+}
+
+.settings-section h2 {
+    font-size: 18px;
+    font-weight: 500;
+    color: #555;
+    margin-bottom: 12px;
+}
+
+label {
+    display: inline-flex;
+    align-items: center;  
+    margin-bottom: 8px;
+    font-weight: 500;
+    width: 100%; 
+}
+
+
+input[type="text"],
+input[type="checkbox"] {
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-bottom: 12px;
+}
+
+/* Buttons */
+.buttons {
+    display: flex;
+    justify-content: center; 
+    margin-top: 24px;
+    width: 100%; 
+}
+
+.buttons button {
+    padding: 8px 16px;
+    margin-right: 12px;
+    background-color: #4285f4;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500; 
+}
+
+/* API Response */
+.response-section {
+    margin-top: 24px;
+}
+
+pre {
+    background-color: #f0f0f0;
+    padding: 16px;
+    border-radius: 4px;
+    overflow: auto;
+    font-family: monospace;
+}

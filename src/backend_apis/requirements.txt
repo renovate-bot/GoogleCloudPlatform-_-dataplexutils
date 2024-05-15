@@ -1,4 +1,5 @@
 fastapi
+fastapi-cors
 db-dtypes
 uvicorn[standard]
 dataplexutils_metadata_wizard-0.0.1.tar.gz
