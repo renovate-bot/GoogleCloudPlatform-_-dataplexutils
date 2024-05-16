@@ -123,9 +123,37 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+#React App
+
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+src/frontend/metadata-wizard-app/node_modules
+src/frontend/metadata-wizard-app/.pnp
+src/frontend/metadata-wizard-app/.pnp.js
+
+# testing
+src/frontend/metadata-wizard-app/coverage
+
+# production
+src/frontend/metadata-wizard-app/build
+
+# misc
+src/frontend/metadata-wizard-app/.DS_Store
+src/frontend/metadata-wizard-app/.env.local
+src/frontend/metadata-wizard-app/.env.development.local
+src/frontend/metadata-wizard-app/.env.test.local
+src/frontend/metadata-wizard-app/.env.production.local
+
+src/frontend/metadata-wizard-app/npm-debug.log*
+src/frontend/metadata-wizard-app/yarn-debug.log*
+src/frontend/metadata-wizard-app/yarn-error.log*
+
+#Project specific
+
 src/backend_apis/*.tar.gz
 src/backend_apis/local_env
-notebooks/metadata_wizard_demo.ipynb
 tests/test_generate_table_prompt.py
 notebooks/metadata_wizard_demo.ipynb
 metadata_v2/metadata_v2.py
