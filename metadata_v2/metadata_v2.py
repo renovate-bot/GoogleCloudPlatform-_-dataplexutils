@@ -754,7 +754,7 @@ class MetadataWizard:
     @lru_cache(maxsize=32)
     def call_gemini(self,prompt,temperature=0.9,project_id="jsk-dataplex-demo-380508",location="us-central1"):
         
-        text_model= GenerativeModel("gemini-pro")
+        text_model= GenerativeModel("gemini-1.5-flash-preview-0514")
         text_model.generate_content(prompt)
         returned_text=""
         generated_description = text_model.generate_content(prompt)
