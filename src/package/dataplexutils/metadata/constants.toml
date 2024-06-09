@@ -5,8 +5,8 @@ DATA_CATALOG_LINEAGE = "data_catalog_lineage"
 [LOGGING]
 WIZARD_LOGGER = "wizard_logger"
 [LLM]
-LLM_TYPE = "gemini-1.5-flash-preview-0514"
-LLM_VISION_TYPE = "gemini-experimental"
+LLM_TYPE = "gemini-1.5-pro-001"
+LLM_VISION_TYPE = "gemini-1.5-pro-001"
 TEMPERATURE = 0.0
 TOP_P = 1.0
 TOP_K = 32
@@ -65,6 +65,13 @@ A sample of the rows is {table_sample}
 Describe only this column content. Please use approx 50 words only
 """
 [DATA]
-NUM_ROWS_TO_SAMPLE = 10
+NUM_ROWS_TO_SAMPLE = 3
 MAX_COLUMN_DESC_LENGTH = 1024
 PDF_MIME_TYPE = "application/pdf"
+
+[GENERATION_STRATEGY]
+NAIVE=1
+DOCUMENTED=2
+DOCUMENTED_AND_CHILDREN=3
+NAIVE_DOCUMENTED_AND_MATCHING_CONFIGURATION=4
+

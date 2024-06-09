@@ -25,9 +25,12 @@ from google.cloud.dataplex_v1 import (
     GetDataScanJobRequest,
 )
 from google.cloud import datacatalog_lineage_v1
+
 from google.cloud.dataplex_v1.types.datascans import DataScanJob
 from google.cloud.exceptions import NotFound
 from vertexai.generative_models import GenerationConfig, GenerativeModel, Part
+import vertexai.preview.generative_models as generative_models
+
 
 
 # Load constants
@@ -185,7 +188,8 @@ class Client:
         project_id: str,
         llm_location: str,
         dataplex_location: str,
-        documentation_uri: str,
+        # Removed documentatino uri at options level, will provide URI at method generate_table_description level
+        #documentation_uri: str,
         client_options: ClientOptions = None,
     ):
         if client_options:
@@ -195,7 +199,8 @@ class Client:
         self._project_id = project_id
         self._dataplex_location = dataplex_location
         self.llm_location = llm_location
-        self._documentation_uri = documentation_uri
+        # Removed documentatino uri at options level, will provide URI at method generate_table_description level
+        #self._documentation_uri = documentation_uri
 
         self._cloud_clients = {
             constants["CLIENTS"]["BIGQUERY"]: bigquery.Client(),
@@ -207,7 +212,46 @@ class Client:
             ]: datacatalog_lineage_v1.LineageClient(),
         }
 
-    def generate_table_description(self, table_fqn):
+    def generate_dataset_tables_descriptions(self, dataset_fqn,strategy=constants["GENERATION_STRATEGY"]["NAIVE"],documentation_csv_uri=None):
+        """Generates metadata on the tables of a whole dataset.
+
+        Args:
+            dataset_fqn: The fully qualified name of the dataset
+            (e.g., 'project.dataset')
+
+        Returns:
+          None.
+
+        Raises:
+            NotFound: If the specified table does not exist.
+        """
+        logger.info(f"Generating metadata for dataset {dataset_fqn}.")
+        #for table in list:
+       #     self.generate_table_description(f"{dataset_fqn}.{table}")
+        try:
+            bq_client = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
+            bq_client = bigquery.Client()
+                        
+            tables = self._list_tables_in_dataset(dataset_fqn)
+            
+            int_strategy = int(strategy)
+
+            tables_sorted = self._order_tables_to_strategy(tables, int_strategy)
+            for table in tables_sorted:
+                self.generate_table_description(table)
+               # self.generate_column_descriptions(table)
+
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+
+
+
+
+
+
+    def generate_table_description(self, table_fqn, documentation_uri=None):
         """Generates metadata on the tabes.
 
         Args:
@@ -221,28 +265,41 @@ class Client:
             NotFound: If the specified table does not exist.
         """
         logger.info(f"Generating metadata for table {table_fqn}.")
+        
+        
         self._table_exists(table_fqn)
         # Get base information
+        logger.info(f"Getting schema for table {table_fqn}.")
         table_schema_str, _ = self._get_table_schema(table_fqn)
+        logger.info(f"Getting sample for table {table_fqn}.")
         table_sample = self._get_table_sample(
             table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
         )
         # Get additional information
+        logger.info(f"Getting table quality for table {table_fqn}.")
         table_quality = self._get_table_quality(
             self._client_options._use_data_quality, table_fqn
         )
+        logger.info(f"Getting table profile for table {table_fqn}.")
         table_profile = self._get_table_profile(
             self._client_options._use_profile, table_fqn
         )
+        logger.info(f"Getting source tables for table {table_fqn}.")
         table_sources_info = self._get_table_sources_info(
             self._client_options._use_lineage_tables, table_fqn
         )
+        logger.info(f"Getting jobs calculating for table {table_fqn}.")
         job_sources_info = self._get_job_sources(
             self._client_options._use_lineage_processes, table_fqn
         )
         prompt_manager = PromptManager(
             PromtType.PROMPT_TYPE_TABLE, self._client_options
         )
+
+        if documentation_uri == "":
+            documentation_uri = None
+
+
         # Get prompt
         table_description_prompt = prompt_manager.get_promtp()
         # Format prompt
@@ -255,13 +312,13 @@ class Client:
             table_sources_info=table_sources_info,
             job_sources_info=job_sources_info,
         )
-        logger.info(f"Prompt used is: {table_description_prompt_expanded}.")
-        table_description = self._llm_inference(table_description_prompt_expanded)
-        logger.info(f"Generated description: {table_description}.")
+        #logger.info(f"Prompt used is: {table_description_prompt_expanded}.")
+        table_description = self._llm_inference(table_description_prompt_expanded,documentation_uri)
+        #logger.info(f"Generated description: {table_description}.")
         # Update table
         self._update_table_bq_description(table_fqn, table_description)
 
-    def generate_columns_descriptions(self, table_fqn):
+    def generate_columns_descriptions(self, table_fqn,documentation_uri=None):
         """Generates metadata on the columns.
 
         Args:
@@ -295,6 +352,10 @@ class Client:
             job_sources_info = self._get_job_sources(
                 self._client_options._use_lineage_processes, table_fqn
             )
+
+            if documentation_uri == "":
+                documentation_uri = None
+
             prompt_manager = PromptManager(
                 PromtType.PROMPT_TYPE_TABLE, self._client_options
             )
@@ -317,9 +378,10 @@ class Client:
                     table_sources_info=table_sources_info,
                     job_sources_info=job_sources_info,
                 )
-                logger.info(f"Prompt used is: {column_description_prompt_expanded}.")
+                #logger.info(f"Prompt used is: {column_description_prompt_expanded}.")
                 column_description = self._llm_inference(
-                    column_description_prompt_expanded
+                    column_description_prompt_expanded,
+                    documentation_uri=documentation_uri,
                 )
                 updated_schema.append(
                     self._get_updated_column(column, column_description)
@@ -331,6 +393,41 @@ class Client:
             raise e(
                 message=f"Generation of column description table {table_fqn} failed."
             )
+
+    def _order_tables_to_strategy(self, tables, strategy):
+        if strategy == constants["GENERATION_STRATEGY"]["NAIVE"]:
+            return tables
+        elif strategy == constants["GENERATION_STRATEGY"]["RANDOM"]:
+            return random.shuffle(tables)
+        elif strategy == constants["GENERATION_STRATEGY"]["ALPHABETICAL"]:
+            return sorted(tables)
+        else:
+            return tables
+
+    def _list_tables_in_dataset(self,dataset_fqn):
+        """Lists all tables in a given dataset.
+
+        Args:
+            project_id: The ID of the project.
+            dataset_id: The ID of the dataset.
+
+        Returns:
+            A list of table names.
+        """
+
+        client = self._cloud_clients[
+                    constants["CLIENTS"]["BIGQUERY"]
+                ]
+        client = bigquery.Client()
+
+        project_id, dataset_id = self._split_dataset_fqn(dataset_fqn)
+
+        dataset_ref = client.dataset(dataset_id, project=project_id)
+        tables = client.list_tables(dataset_ref)
+
+        table_names = [str(table.full_table_id).replace(":",".") for table in tables]
+        return table_names
+
 
     def _get_updated_column(self, column, column_description):
         try:
@@ -417,9 +514,28 @@ class Client:
             Add stringdocs
         """
         try:
-            pattern = r"^([^.]+)\.([^.]+)\.([^.]+)"
+            pattern = r"^([^.]+)[\.:]([^.]+)\.([^.]+)"
+            logger.info(f"Splitting table FQN: {table_fqn}.")
             match = re.search(pattern, table_fqn)
+            logger.info(f"I hope i Found 3 groups: {match.group(1)} {match.group(2)} {match.group(3)}")
             return match.group(1), match.group(2), match.group(3)
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+        
+    def _split_dataset_fqn(self, dataset_fqn):
+        """Add stringdocs
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
+        try:
+            pattern = r"^([^.]+)\.([^.]+)"
+            match = re.search(pattern, dataset_fqn)
+            return match.group(1), match.group(2)
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
@@ -454,6 +570,7 @@ class Client:
             scan_client = self._cloud_clients[
                 constants["CLIENTS"]["DATAPLEX_DATA_SCAN"]
             ]
+            logger.info(f"Getting table scan reference for table:{table_fqn}.")
             data_scans = scan_client.list_data_scans(
                 parent=f"projects/{self._project_id}/locations/{self._dataplex_location}"
             )
@@ -598,8 +715,10 @@ class Client:
             ]
             target = datacatalog_lineage_v1.EntityReference()
             target.fully_qualified_name = f"bigquery:{table_fqn}"
+            target_dataset=str(self._get_dataset_location(table_fqn)).lower()
+            logger.info(f"_get_table_sources:Searching for lineage links for table {table_fqn}. in dataset {target_dataset}")
             request = datacatalog_lineage_v1.SearchLinksRequest(
-                parent=f"projects/{self._project_id}/locations/{self._dataplex_location}",
+                parent=f"projects/{self._project_id}/locations/{target_dataset}",
                 target=target,
             )
             link_results = lineage_client.search_links(request=request)
@@ -618,7 +737,7 @@ class Client:
         try:
             bq_client = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
             project_id, dataset_id, _ = self._split_table_fqn(table_fqn)
-            return bq_client.get_dataset(f"{project_id}.{dataset_id}").location
+            return str(bq_client.get_dataset(f"{project_id}.{dataset_id}").location).lower()
         except Exception as e:
             logger.error(f"Exception: {e}.")
             raise e
@@ -641,11 +760,18 @@ class Client:
                 target = datacatalog_lineage_v1.EntityReference()
                 target.fully_qualified_name = f"bigquery:{table_fqn}"
                 dataset_location = self._get_dataset_location(table_fqn)
+                logger.info(f"Searching for lineage links for table {table_fqn}.")
                 request = datacatalog_lineage_v1.SearchLinksRequest(
                     parent=f"projects/{self._project_id}/locations/{dataset_location}",
                     target=target,
                 )
-                link_results = lineage_client.search_links(request=request)
+                try:
+                    link_results = lineage_client.search_links(request=request)
+                except Exception as e:
+                    logger.error(f"Cannot find lineage links for table {table_fqn}:exception:{e}.")
+                    return []
+                    raise e
+                
                 if len(link_results.links) > 0:
                     links = [link.name for link in link_results]
                     lineage_processes_ids = [
@@ -701,7 +827,7 @@ class Client:
             logger.error(f"Exception: {e}.")
             raise e
 
-    def _llm_inference(self, prompt):
+    def _llm_inference(self, prompt, documentation_uri=None):
         try:
             vertexai.init(project=self._project_id, location=self.llm_location)
             if self._client_options._use_ext_documents:
@@ -716,13 +842,20 @@ class Client:
                 candidate_count=constants["LLM"]["CANDIDATE_COUNT"],
                 max_output_tokens=constants["LLM"]["MAX_OUTPUT_TOKENS"],
             )
-            if self._client_options._use_ext_documents:
+            safety_settings = {
+                generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                generative_models.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                generative_models.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+            }
+            if documentation_uri != None:
                 doc = Part.from_uri(
-                    self._documentation_uri, mime_type=constants["DATA"]["PDF_MIME_TYPE"]
+                    documentation_uri, mime_type=constants["DATA"]["PDF_MIME_TYPE"]
                 )
                 responses = model.generate_content(
                     [doc, prompt],
                     generation_config=generation_config,
+                    safety_settings=safety_settings,
                     stream=False,
                 )
             else:

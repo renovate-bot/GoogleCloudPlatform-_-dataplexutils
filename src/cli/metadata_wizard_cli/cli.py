@@ -8,6 +8,12 @@
 # OS Imports
 import argparse
 import requests
+import logging
+
+logger = logging.getLogger(__name__)
+# Set log level (optional)
+logger.setLevel(logging.DEBUG) # or logging.INFO, logging.WARNING, etc.
+
 
 
 def _call_api(
@@ -26,11 +32,14 @@ def _call_api(
     table_dataset_id,
     table_id,
     debug,
+    documentation_csv_uri,
+    strategy
 ):
     API_URL = f"https://{service}"
-    API_URL_DEBUG = "http://localhost:8080"
+    API_URL_DEBUG = "http://localhost:8000"
     METADATA_TABLE_SCOPE_ROUTE = "/generate_table_description"
     METADATA_COLUMNS_SCOPE_ROUTE = "/generate_columns_descriptions"
+    METADATA_DATASET_SCOPE_ROUTE = "/generate_dataset_tables_descriptions"
 
     if debug:
         API_URL = API_URL_DEBUG
@@ -38,6 +47,8 @@ def _call_api(
         url = API_URL + METADATA_TABLE_SCOPE_ROUTE
     elif scope == "columns":
         url = API_URL + METADATA_COLUMNS_SCOPE_ROUTE
+    elif scope == "dataset":
+        url = API_URL + METADATA_DATASET_SCOPE_ROUTE
 
     params = {
         "client_options_settings": {
@@ -50,19 +61,26 @@ def _call_api(
         "client_settings": {
             "project_id": dataplex_project_id,
             "llm_location": llm_location,
-            "dataplex_location": dataplex_location,
-            "documentation_uri": documentation_uri
+            "dataplex_location": dataplex_location
         },
         "table_settings": {
             "project_id": table_project_id,
             "dataset_id": table_dataset_id,
-            "table_id": table_id
+            "table_id": table_id,
+            "documentation_uri": documentation_uri
+        },
+        "dataset_settings": {
+            "project_id": table_project_id,
+            "dataset_id": table_dataset_id,
+            "documentation_csv_uri": documentation_csv_uri,
+            "strategy": strategy
         },
     }
     try:
         response = requests.post(url, json=params) 
         response.raise_for_status()  
         print(response.json())
+        logger.debug(response.json())
     except requests.exceptions.RequestException as e:
         print(f"Error calling API: {e}")
     except requests.exceptions.JSONDecodeError as e:
@@ -159,13 +177,28 @@ def _get_input_arguments():
         dest="table_id",
         required=True,
         type=str
-        )
+        )   
     parser.add_argument(
         "--debug",
         dest="debug",
         required=False,
         type=bool,
         default=False
+        )
+    parser.add_argument(
+        "--strategy",
+        dest="strategy",
+        required=False,
+        type=str,
+        default="1"
+        )
+
+    parser.add_argument(
+        "--documentation_csv_uri",
+        dest="documentation_csv_uri",
+        required=False,
+        type=str,
+        default=""
         )
     return parser.parse_args()
 
@@ -187,6 +220,8 @@ def main():
     table_dataset_id = args.table_dataset_id
     table_id = args.table_id
     debug = args.debug
+    strategy = args.strategy
+    documentation_csv_uri = args.documentation_csv_uri
     _call_api(
         service,
         scope,
@@ -203,8 +238,10 @@ def main():
         table_dataset_id,
         table_id,
         debug,
+        strategy,
+        documentation_csv_uri
+        
     )
-
 
 if __name__ == "__main__":
     main()

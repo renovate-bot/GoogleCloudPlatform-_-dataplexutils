@@ -157,3 +157,5 @@ src/backend_apis/local_env
 tests/test_generate_table_prompt.py
 notebooks/metadata_wizard_demo.ipynb
 metadata_v2/metadata_v2.py
+notebooks/metadata_wizard_demo.ipynb
+tests/generate_dataset.py
