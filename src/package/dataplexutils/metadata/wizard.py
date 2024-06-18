@@ -31,7 +31,8 @@ from google.cloud.exceptions import NotFound
 from vertexai.generative_models import GenerationConfig, GenerativeModel, Part
 import vertexai.preview.generative_models as generative_models
 
-
+import random
+from google.cloud import storage
 
 # Load constants
 constants = toml.loads(pkgutil.get_data(__name__, "constants.toml").decode())
@@ -232,13 +233,40 @@ class Client:
             bq_client = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
             bq_client = bigquery.Client()
                         
+
+            int_strategy = int(strategy)
+            
+            if int_strategy not in constants["GENERATION_STRATEGY"].values():
+                raise ValueError(f"Invalid strategy: {strategy}.")
+            
+            if int_strategy == constants["GENERATION_STRATEGY"]["DOCUMENTED"]:
+                if documentation_csv_uri == None:
+                    raise ValueError("A documentation URI is required for the DOCUMENTED strategy.")
+
             tables = self._list_tables_in_dataset(dataset_fqn)
             
-            int_strategy = int(strategy)
+            if int_strategy == constants["GENERATION_STRATEGY"]["DOCUMENTED"]:
+                tables_from_uri = self._get_tables_from_uri(documentation_csv_uri)
+                for table in tables_from_uri:
+                    if table[0] not in tables:
+                        raise ValueError(f"Table {table} not found in dataset {dataset_fqn}.")
+                    self.generate_table_description(table[0], table[1])
 
-            tables_sorted = self._order_tables_to_strategy(tables, int_strategy)
-            for table in tables_sorted:
-                self.generate_table_description(table)
+            if int_strategy == constants["GENERATION_STRATEGY"]["DOCUMENTED_THEN_REST"]:
+                tables_from_uri = self._get_tables_from_uri(documentation_csv_uri)
+                for table in tables_from_uri:
+                    if table not in tables:
+                        raise ValueError(f"Table {table} not found in dataset {dataset_fqn}.")
+                    self.generate_table_description(table[0], table[1])
+                tables_from_uri_first_elements = [table[0] for table in tables_from_uri]
+                for table in tables:
+                    if table not in tables_from_uri_first_elements:
+                        self.generate_table_description(table)
+            
+            if int_strategy in [constants["GENERATION_STRATEGY"]["NAIVE"], constants["GENERATION_STRATEGY"]["RANDOM"], constants["GENERATION_STRATEGY"]["ALPHABETICAL"]]:
+                tables_sorted = self._order_tables_to_strategy(tables, int_strategy)
+                for table in tables_sorted:
+                    self.generate_table_description(table)
                # self.generate_column_descriptions(table)
 
         except Exception as e:
@@ -394,11 +422,54 @@ class Client:
                 message=f"Generation of column description table {table_fqn} failed."
             )
 
+    def _get_tables_from_uri(self, documentation_csv_uri):
+        """Reads the CSV file from Google Cloud Storage and returns the tables.
+
+        Args:
+            documentation_csv_uri: The URI of the CSV file in Google Cloud Storage.
+
+        Returns:
+            A list of tables.
+
+        Raises:
+            Exception: If there is an error reading the CSV file.
+        """
+        try:
+            # Create a client to interact with Google Cloud Storage
+            storage_client = storage.Client()
+
+            # Get the bucket and blob names from the URI
+            bucket_name, blob_name = documentation_csv_uri.split("/", 3)[2:]
+
+            # Get the bucket and blob objects
+            bucket = storage_client.get_bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+
+            # Download the CSV file as a string
+            csv_data = blob.download_as_text()
+
+            # Split the CSV data into lines
+            lines = csv_data.split("\n")
+
+            # Remove any empty lines
+            lines = [line for line in lines if line.strip()]
+
+            # Extract the table names from the lines
+            tables = [(line.split(",")[0], line.split(",")[1]) for line in lines]
+
+            return tables
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
     def _order_tables_to_strategy(self, tables, strategy):
+        
         if strategy == constants["GENERATION_STRATEGY"]["NAIVE"]:
             return tables
         elif strategy == constants["GENERATION_STRATEGY"]["RANDOM"]:
-            return random.shuffle(tables)
+            tables_copy=tables.copy()
+            random.shuffle(tables_copy)
+            return tables_copy
         elif strategy == constants["GENERATION_STRATEGY"]["ALPHABETICAL"]:
             return sorted(tables)
         else:
@@ -515,9 +586,9 @@ class Client:
         """
         try:
             pattern = r"^([^.]+)[\.:]([^.]+)\.([^.]+)"
-            logger.info(f"Splitting table FQN: {table_fqn}.")
+            logger.debug(f"Splitting table FQN: {table_fqn}.")
             match = re.search(pattern, table_fqn)
-            logger.info(f"I hope i Found 3 groups: {match.group(1)} {match.group(2)} {match.group(3)}")
+            logger.debug(f"I hope i Found 3 groups: {match.group(1)} {match.group(2)} {match.group(3)}")
             return match.group(1), match.group(2), match.group(3)
         except Exception as e:
             logger.error(f"Exception: {e}.")

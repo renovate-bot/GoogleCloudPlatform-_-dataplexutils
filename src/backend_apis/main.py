@@ -35,6 +35,7 @@ class DatasetSettings(BaseModel):
     project_id: str
     dataset_id: str
     documentation_csv_uri: str
+    strategy: str
 
 
 app.add_middleware(
@@ -167,11 +168,11 @@ def generate_dataset_tables_descriptions(
             client_options=client_options,
             
         )
-        print("NO KURWA")
+
         dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
         logger.info(f"Received arguments: {client_options_settings}, {client_settings}, {dataset_settings}")
         logger.info(f"Generating for dataset: {dataset_fqn}")
-        client.generate_dataset_tables_descriptions(dataset_fqn,dataset_settings.documentation_csv_uri)
+        client.generate_dataset_tables_descriptions(dataset_fqn,dataset_settings.strategy,dataset_settings.documentation_csv_uri)
         return {"message": "Dataset table descriptions generated successfully"}
     except Exception as e:
         logger.exception("An error occurred while generating dataset descriptions") 

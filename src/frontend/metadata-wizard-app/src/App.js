@@ -3,7 +3,7 @@ import axios from 'axios';
 import './styles.css';
 import '@fontsource/roboto/400.css';
 import {
-  TextField, Button, FormControlLabel, Checkbox, Box
+  TextField, Button, FormControlLabel, Checkbox, Box, Select, MenuItem, InputLabel
 } from '@mui/material';
 
 function App() {
@@ -18,13 +18,20 @@ function App() {
     client_settings: {
       project_id: '',
       llm_location: '',
-      dataplex_location: '',
-      documentation_uri: ''
+      dataplex_location: ''
+      //documentation_uri: ''
     },
     table_settings: {
       project_id: '',
       dataset_id: '',
       table_id: '',
+      documentation_uri: ''
+    },
+    dataset_settings: {
+      project_id: '',
+      dataset_id: '',
+      documentation_csv_uri: '',
+      strategy: '1'
     },
   });
 
@@ -46,7 +53,36 @@ function App() {
           [child]: type === 'checkbox' ? checked : value,
         },
       }));
+      if (parent === 'table_settings' && child === 'dataset_id') {
+        setParams((prevParams) => ({
+          ...prevParams,
+          dataset_settings: {
+            ...prevParams.dataset_settings,
+            dataset_id: value, // Store the value in dataset_settings
+          },
+        }));
+      }
+      if (parent === 'table_settings' && child === 'project_id') {
+        setParams((prevParams) => ({
+          ...prevParams,
+          dataset_settings: {
+            ...prevParams.dataset_settings,
+            project_id: value, // Store the value in dataset_settings
+          },
+        }));
+      }
+      
+      if (name === 'dataset_settings.strategy') {
+        setParams((prevParams) => ({
+          ...prevParams,
+          dataset_settings: {
+            ...prevParams.dataset_settings,
+            strategy: value,
+          },
+        }));
+      }
     }
+    
   };
 
   const callApi = async (endpoint) => {
@@ -125,6 +161,22 @@ function App() {
               label="Use External Documents"
             />
           </div>
+          <div>
+          <InputLabel id="strategy-select-label">Dataset Strategy</InputLabel>
+          <Select
+            labelId="strategy-select-label"
+            id="dataset_settings.strategy"
+            name="dataset_settings.strategy"
+            value={params.dataset_settings.strategy}
+            onChange={handleChange}
+            fullWidth
+          >
+            <MenuItem value="1">Naive</MenuItem>
+            <MenuItem value="2">Documented</MenuItem>
+            <MenuItem value="3">Documented and then rest</MenuItem>
+          </Select>
+        </div>
+          
         </Box>
 
         <Box className="settings-section">
@@ -164,7 +216,17 @@ function App() {
               label="Documentation URI"
               id="client_settings.documentation_uri"
               name="client_settings.documentation_uri"
-              value={params.client_settings.documentation_uri}
+              value={params.table_settings.documentation_uri}
+              onChange={handleChange}
+              fullWidth
+            />
+          </div>
+          <div>
+            <TextField
+              label="Documentation CSV URI"
+              id="dataset_settings.documentation_uri"
+              name="dataset_settings.documentation_uri"
+              value={params.dataset_settings.documentation_uri}
               onChange={handleChange}
               fullWidth
             />
@@ -225,6 +287,9 @@ function App() {
         </Button>
         <Button variant="contained" onClick={() => callApi('generate_columns_descriptions')}>
           Generate Column Descriptions
+        </Button>
+        <Button variant="contained" onClick={() => callApi('generate_dataset_tables_descriptions')}>
+          Generate All Tables in Dataset Descriptions
         </Button>
       </Box>
 

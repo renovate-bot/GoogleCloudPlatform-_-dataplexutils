@@ -159,3 +159,4 @@ notebooks/metadata_wizard_demo.ipynb
 metadata_v2/metadata_v2.py
 notebooks/metadata_wizard_demo.ipynb
 tests/generate_dataset.py
+tests/test_documentation_csv.csv
