@@ -65,7 +65,7 @@ A sample of the rows is {table_sample}
 Describe only this column content. Please use approx 50 words only
 """
 [DATA]
-NUM_ROWS_TO_SAMPLE = 3
+NUM_ROWS_TO_SAMPLE = 0
 MAX_COLUMN_DESC_LENGTH = 1024
 PDF_MIME_TYPE = "application/pdf"
 
