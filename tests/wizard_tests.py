@@ -72,7 +72,9 @@ class TestMetadataWizardClient:
         )
 
     def teardown_class(self):
-        pass
+        bq_client = bigquery.Client()
+        dataset_id = f"{self._project_id}.{self._dataset_id}"
+        bq_client.delete_dataset(dataset_id, delete_contents=True, not_found_ok=True)     
 
     def _create_dataset(self, project_id, dataset_random_name):
         bq_client = bigquery.Client()
@@ -189,4 +191,4 @@ class TestMetadataWizardClient:
         # Test with invalid table FQN
         with pytest.raises(Exception) as e:
             self._wizard_client.generate_columns_descriptions('invalid.table.fqn')
-        assert f"Generation of column description table {self._table_fqn} failed." in str(e)
+        assert f"Generation of column description table self._table_fqn failed." in str(e)
