@@ -313,7 +313,7 @@ class Client:
         self._table_exists(table_fqn)
         # Get base information
         logger.info(f"Getting schema for table {table_fqn}.")
-        table_schema_str, _ = self._get_table_schema(table_fqn)
+        table_schema_str, _ = self._`get_table_`schema(table_fqn)
         logger.info(f"Getting sample for table {table_fqn}.")
         table_sample = self._get_table_sample(
             table_fqn, constants["DATA"]["NUM_ROWS_TO_SAMPLE"]
