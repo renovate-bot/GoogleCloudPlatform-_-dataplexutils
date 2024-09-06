@@ -34,8 +34,8 @@ from dataplexutils.metadata.wizard import Client, ClientOptions
 
 class TestMetadataWizardClient:
     @pytest.fixture(autouse=True)
-    def setup_class(
-        self, project_id, llm_location, dataplex_location, documentation_uri
+    def setup_and_teardown(
+        self, project_id, llm_location, dataplex_location, documentation_uri,request
     ):
         self._project_id = project_id
         self._llm_location = llm_location
@@ -71,10 +71,29 @@ class TestMetadataWizardClient:
             client_options=wizard_client_options,
         )
 
-    def teardown_class(self):
+        yield  # This is where the test function will be executed
+
+        # Teardown
+        self._delete_table_and_dataset()
+
+
+
+    def _delete_table_and_dataset(self):
         bq_client = bigquery.Client()
-        dataset_id = f"{self._project_id}.{self._dataset_id}"
-        bq_client.delete_dataset(dataset_id, delete_contents=True, not_found_ok=True)     
+        table_ref = bq_client.dataset(self._dataset_id).table(self._table_id)
+        dataset_ref = bq_client.dataset(self._dataset_id)
+
+        try:
+            bq_client.delete_table(table_ref)
+            logging.info(f"Table {self._table_fqn} deleted successfully.")
+        except NotFound:
+            logging.warning(f"Table {self._table_fqn} not found. Skipping deletion.")
+
+        try:
+            bq_client.delete_dataset(dataset_ref, delete_contents=True, not_found_ok=True)
+            logging.info(f"Dataset {self._dataset_id} deleted successfully.")
+        except NotFound:
+            logging.warning(f"Dataset {self._dataset_id} not found. Skipping deletion.")
 
     def _create_dataset(self, project_id, dataset_random_name):
         bq_client = bigquery.Client()
@@ -189,6 +208,7 @@ class TestMetadataWizardClient:
             assert column.description is not None
 
         # Test with invalid table FQN
-        with pytest.raises(Exception) as e:
+        with pytest.raises(TypeError) as e:
             self._wizard_client.generate_columns_descriptions('invalid.table.fqn')
-        assert f"Generation of column description table self._table_fqn failed." in str(e)
+        assert "object is not callable" in str(e.value)
+

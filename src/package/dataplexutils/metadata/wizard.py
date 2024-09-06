@@ -360,6 +360,7 @@ class Client:
         #logger.info(f"Generated description: {table_description}.")
         # Update table
         self._update_table_bq_description(table_fqn, table_description)
+        return "Table description generated successfully"
 
     def generate_columns_descriptions(self, table_fqn,documentation_uri=None):
         """Generates metadata on the columns.
@@ -584,7 +585,7 @@ class Client:
         """
         try:
             bq_client = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
-            query = f"SELECT * FROM {table_fqn} LIMIT {num_rows_to_sample}"
+            query = f"SELECT * FROM `{table_fqn}` LIMIT {num_rows_to_sample}"
             return bq_client.query(query).to_dataframe().to_json()
         except bigquery.exceptions.BadRequest as e:
             print(f"BigQuery Bad Request: {e}")
