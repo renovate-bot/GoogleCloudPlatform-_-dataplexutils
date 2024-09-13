@@ -38,6 +38,8 @@ def _call_api(
     use_profile,
     use_data_quality,
     use_ext_documents,
+    persist_to_dataplex_catalog,
+    stage_for_review,
     dataplex_project_id,
     llm_location,
     dataplex_location,
@@ -71,6 +73,8 @@ def _call_api(
             "use_profile": use_profile,
             "use_data_quality": use_data_quality,
             "use_ext_documents": use_ext_documents,
+            "persist_to_dataplex_catalog": persist_to_dataplex_catalog,
+            "stage_for_review": stage_for_review
         },
         "client_settings": {
             "project_id": dataplex_project_id,
@@ -91,7 +95,10 @@ def _call_api(
         },
     }
     try:
+        print(params)
+
         response = requests.post(url, json=params) 
+        
         response.raise_for_status()  
         print(response.json())
         logger.debug(response.json())
@@ -214,6 +221,21 @@ def _get_input_arguments():
         type=str,
         default=""
         )
+    parser.add_argument(
+        "--persist_to_dataplex_catalog",
+        dest="persist_to_dataplex_catalog",
+        required=False,
+        type=bool,
+        default=False
+        )
+    parser.add_argument(
+        "--stage_for_review",
+        dest="stage_for_review",
+        required=False,
+        type=bool,
+        default=False
+        )
+        
     return parser.parse_args()
 
 
@@ -226,6 +248,8 @@ def main():
     use_profile = args.use_profile
     use_data_quality = args.use_data_quality
     use_ext_documents = args.use_ext_documents
+    persist_to_dataplex_catalog = args.persist_to_dataplex_catalog
+    stage_for_review = args.stage_for_review
     dataplex_project_id = args.dataplex_project_id
     llm_location = args.llm_location
     dataplex_location = args.dataplex_location
@@ -244,6 +268,8 @@ def main():
         use_profile,
         use_data_quality,
         use_ext_documents,
+        persist_to_dataplex_catalog,
+        stage_for_review,
         dataplex_project_id,
         llm_location,
         dataplex_location,
@@ -254,7 +280,6 @@ def main():
         debug,
         strategy,
         documentation_csv_uri
-        
     )
 
 if __name__ == "__main__":

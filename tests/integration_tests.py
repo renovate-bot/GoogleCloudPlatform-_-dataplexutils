@@ -98,7 +98,9 @@ def test_api_generate_table_description(test_params, test_table):
             'use_lineage_processes': True,
             'use_profile': True,
             'use_data_quality': True,
-            'use_ext_documents': False
+            'use_ext_documents': False,
+            'persist_to_dataplex_catalog': True,
+            'stage_for_review': False
         },
         'client_settings': {
             'project_id': test_params['project_id'],
@@ -123,7 +125,9 @@ def test_end_to_end_table_description(test_params, test_table, bq_client):
         use_lineage_processes=True,
         use_profile=True,
         use_data_quality=True,
-        use_ext_documents=False
+        use_ext_documents=False,
+        persist_to_dataplex_catalog=True,
+        stage_for_review=False
     )
     client = Client(
         project_id=test_params['project_id'],

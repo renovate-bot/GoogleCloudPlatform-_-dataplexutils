@@ -188,12 +188,16 @@ class ClientOptions:
         use_profile=False,
         use_data_quality=False,
         use_ext_documents=False,
+        persist_to_dataplex_catalog=True,
+        stage_for_review=False,
     ):
         self._use_lineage_tables = use_lineage_tables
         self._use_lineage_processes = use_lineage_processes
         self._use_profile = use_profile
         self._use_data_quality = use_data_quality
         self._use_ext_documents = use_ext_documents
+        self._persist_to_dataplex_catalog = persist_to_dataplex_catalog
+        self._stage_for_review = stage_for_review
 
 
 class Client:
@@ -401,7 +405,7 @@ class Client:
                 documentation_uri = None
 
             prompt_manager = PromptManager(
-                PromtType.PROMPT_TYPE_TABLE, self._client_options
+                PromtType.PROMPT_TYPE_COLUMN, self._client_options
             )
             # Get prompt
             prompt_manager = PromptManager(

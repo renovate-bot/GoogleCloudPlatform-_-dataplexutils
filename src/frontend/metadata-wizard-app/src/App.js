@@ -30,6 +30,8 @@ function App() {
       use_profile: false,
       use_data_quality: false,
       use_ext_documents: false,
+      persist_to_dataplex_catalog: true,
+      stage_for_review: false,
     },
     client_settings: {
       project_id: '',
@@ -53,6 +55,9 @@ function App() {
 
   const [apiUrlBase, setApiUrlBase] = useState(null);
   const [apiResponse, setApiResponse] = useState(null);
+
+  const [persistToDataplex, setPersistToDataplex] = useState(true);
+  const [stageForReview, setStageForReview] = useState(false);
 
   const handleChange = (event) => {
     const { name, value, type, checked } = event.target;
@@ -101,11 +106,40 @@ function App() {
     
   };
 
+  const handlePersistToDataplexChange = (event) => {
+    setPersistToDataplex(event.target.checked);
+  };
+
+  const handleStageForReviewChange = (event) => {
+    setStageForReview(event.target.checked);
+  };
+
   const callApi = async (endpoint) => {
     try {
       const response = await axios.post(
         `${apiUrlBase}/${endpoint}`,
-        params
+        {
+          client_options_settings: {
+            use_lineage_tables: params.client_options_settings.use_lineage_tables,
+            use_lineage_processes: params.client_options_settings.use_lineage_processes,
+            use_profile: params.client_options_settings.use_profile,
+            use_data_quality: params.client_options_settings.use_data_quality,
+            use_ext_documents: params.client_options_settings.use_ext_documents,
+            persist_to_dataplex_catalog: persistToDataplex,
+            stage_for_review: stageForReview,
+          },
+          client_settings: {
+            project_id: params.client_settings.project_id,
+            llm_location: params.client_settings.llm_location,
+            dataplex_location: params.client_settings.dataplex_location,
+          },
+          table_settings: {
+            project_id: params.table_settings.project_id,
+            dataset_id: params.table_settings.dataset_id,
+            table_id: params.table_settings.table_id,
+            documentation_uri: params.table_settings.documentation_uri,
+          },
+        }
       );
       setApiResponse(response.data);
     } catch (error) {
@@ -307,6 +341,18 @@ function App() {
         <Button variant="contained" onClick={() => callApi('generate_dataset_tables_descriptions')}>
           Generate All Tables in Dataset Descriptions
         </Button>
+      </Box>
+
+      <Box className="settings-section">
+        <h2>Additional Options</h2>
+        <FormControlLabel
+          control={<Checkbox checked={persistToDataplex} onChange={handlePersistToDataplexChange} />}
+          label="Persist Table description to Dataplex Catalog"
+        />
+        <FormControlLabel
+          control={<Checkbox checked={stageForReview} onChange={handleStageForReviewChange} />}
+          label="Stage generations in Dataplex for Review"
+        />
       </Box>
 
       {apiResponse && (

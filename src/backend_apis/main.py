@@ -33,6 +33,8 @@ class ClientOptionsSettings(BaseModel):
     use_profile: bool
     use_data_quality: bool
     use_ext_documents: bool
+    persist_to_dataplex_catalog: bool
+    stage_for_review: bool
 
 
 class ClientSettings(BaseModel):
@@ -75,7 +77,7 @@ def generate_table_description(
     client_settings: ClientSettings = Body(),
     table_settings: TableSettings = Body(),
 ):
-
+ 
     """
         Generates a table description in Dataplex using the provided settings.
 
@@ -91,11 +93,13 @@ def generate_table_description(
     """
     try:
         client_options = ClientOptions(
-            client_options_settings.use_lineage_tables,
-            client_options_settings.use_lineage_processes,
-            client_options_settings.use_profile,
-            client_options_settings.use_data_quality,
-            client_options_settings.use_ext_documents
+            use_lineage_tables=client_options_settings.use_lineage_tables,
+            use_lineage_processes=client_options_settings.use_lineage_processes,
+            use_profile=client_options_settings.use_profile,
+            use_data_quality=client_options_settings.use_data_quality,
+            use_ext_documents=client_options_settings.use_ext_documents,
+            persist_to_dataplex_catalog=client_options_settings.persist_to_dataplex_catalog,
+            stage_for_review=client_options_settings.stage_for_review
         )
         client = Client(
             project_id=client_settings.project_id,
@@ -130,7 +134,9 @@ def generate_columns_descriptions(
             client_options_settings.use_lineage_processes,
             client_options_settings.use_profile,
             client_options_settings.use_data_quality,
-            client_options_settings.use_ext_documents
+            client_options_settings.use_ext_documents,
+            client_options_settings.persist_to_dataplex_catalog,
+            client_options_settings.stage_for_review
         )
         client = Client(
             project_id=client_settings.project_id,
@@ -176,6 +182,8 @@ def generate_dataset_tables_descriptions(
             client_options_settings.use_profile,
             client_options_settings.use_data_quality,
             client_options_settings.use_ext_documents,
+            client_options_settings.persist_to_dataplex_catalog,
+            client_options_settings.stage_for_review
         )
         client = Client(
             project_id=client_settings.project_id,
