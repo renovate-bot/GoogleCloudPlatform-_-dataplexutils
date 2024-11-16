@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 # Please read these Warnings
+This is not an officially supported Google product.
+
 Warning: Wizard is a demo project. It is not production grade and should not be treated as such. We try to do as much testing as possible but you run the tool at your own risk.
 
 Warning: Wizard will overwrite and replace descriptions of  BigQuery tables and columns it's asked to describe. Use with caution.
