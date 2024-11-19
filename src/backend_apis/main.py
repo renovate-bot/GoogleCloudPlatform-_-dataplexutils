@@ -14,18 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from fastapi import FastAPI, Body, HTTPException, status
+from fastapi import FastAPI, Body, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import dataplexutils.metadata.wizard as mw
 from dataplexutils.metadata.wizard import Client, ClientOptions
 from pydantic import BaseModel
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
-
-import logging
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-# Set log level (optional)
 
 class ClientOptionsSettings(BaseModel):
     use_lineage_tables: bool
@@ -58,8 +58,7 @@ class DatasetSettings(BaseModel):
 
 app.add_middleware(
     CORSMiddleware,
-    # @velascoluis - This is for the local frontend
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],  # Allow all origins for debugging
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -92,6 +91,7 @@ def generate_table_description(
 
     """
     try:
+        print("Client options class definition: ",ClientOptions.__dict__)
         client_options = ClientOptions(
             use_lineage_tables=client_options_settings.use_lineage_tables,
             use_lineage_processes=client_options_settings.use_lineage_processes,
@@ -203,3 +203,71 @@ def generate_dataset_tables_descriptions(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
+
+@app.post("/generate_dataset_tables_columns_descriptions")
+def generate_dataset_tables_columns_descriptions(
+    client_options_settings: ClientOptionsSettings = Body(),
+    client_settings: ClientSettings = Body(),
+    table_settings: TableSettings = Body(),
+    dataset_settings: DatasetSettings = Body(),
+):
+    """
+        Generates a table description in Dataplex using the provided settings.
+
+        Args:
+            client_options_settings: Configuration for the Dataplex client options.
+            client_settings: Project and location details.
+            dataset_settings: Dataset identifier information.
+        
+        Returns:
+            The result of the multiple table description generation process, or an error
+            message if something goes wrong.
+    
+    """
+    try:
+        logger.debug("Generating dataset tables request")
+        client_options = ClientOptions(
+            client_options_settings.use_lineage_tables,
+            client_options_settings.use_lineage_processes,
+            client_options_settings.use_profile,
+            client_options_settings.use_data_quality,
+            client_options_settings.use_ext_documents,
+            client_options_settings.persist_to_dataplex_catalog,
+            client_options_settings.stage_for_review
+        )
+        client = Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,        
+            client_options=client_options,
+            
+        )
+
+        dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
+        logger.info(f"Received arguments: {client_options_settings}, {client_settings}, {dataset_settings}")
+        logger.info(f"Generating for dataset: {dataset_fqn}")
+        client.generate_dataset_tables_columns_descriptions(dataset_fqn,dataset_settings.strategy,dataset_settings.documentation_csv_uri)
+        return {"message": "Dataset table columns descriptions generated successfully"}
+    except Exception as e:
+        logger.exception("An error occurred while generating dataset descriptions") 
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    logger.error(f"HTTP error occurred: {exc.detail}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"Request: {request.method} {request.url}")
+    logger.debug(f"Headers: {request.headers}")
+    body = await request.body()
+    logger.debug(f"Body: {body.decode()}")
+    response = await call_next(request)
+    return response

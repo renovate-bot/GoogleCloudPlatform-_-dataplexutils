@@ -59,6 +59,8 @@ function App() {
   const [persistToDataplex, setPersistToDataplex] = useState(true);
   const [stageForReview, setStageForReview] = useState(false);
 
+  const [isGenerating, setIsGenerating] = useState(false);
+
   const handleChange = (event) => {
     const { name, value, type, checked } = event.target;
 
@@ -116,36 +118,61 @@ function App() {
 
   const callApi = async (endpoint) => {
     try {
+      const requestBody = {
+        client_options_settings: {
+          use_lineage_tables: params.client_options_settings.use_lineage_tables,
+          use_lineage_processes: params.client_options_settings.use_lineage_processes,
+          use_profile: params.client_options_settings.use_profile,
+          use_data_quality: params.client_options_settings.use_data_quality,
+          use_ext_documents: params.client_options_settings.use_ext_documents,
+          persist_to_dataplex_catalog: persistToDataplex,
+          stage_for_review: stageForReview,
+        },
+        client_settings: {
+          project_id: params.client_settings.project_id,
+          llm_location: params.client_settings.llm_location,
+          dataplex_location: params.client_settings.dataplex_location,
+        },
+        table_settings: {
+          project_id: params.table_settings.project_id,
+          dataset_id: params.table_settings.dataset_id,
+          table_id: params.table_settings.table_id,
+          documentation_uri: params.table_settings.documentation_uri,
+        },
+      };
+
+      if (endpoint === 'generate_dataset_tables_descriptions') {
+        requestBody.dataset_settings = {
+          project_id: params.dataset_settings.project_id,
+          dataset_id: params.dataset_settings.dataset_id,
+          documentation_csv_uri: params.dataset_settings.documentation_csv_uri,
+          strategy: params.dataset_settings.strategy,
+        };
+      }
+
+      console.log("Sending request to:", `${apiUrlBase}/${endpoint}`);
+      console.log("Request body:", JSON.stringify(requestBody, null, 2));
+
+      setIsGenerating(true);
       const response = await axios.post(
         `${apiUrlBase}/${endpoint}`,
-        {
-          client_options_settings: {
-            use_lineage_tables: params.client_options_settings.use_lineage_tables,
-            use_lineage_processes: params.client_options_settings.use_lineage_processes,
-            use_profile: params.client_options_settings.use_profile,
-            use_data_quality: params.client_options_settings.use_data_quality,
-            use_ext_documents: params.client_options_settings.use_ext_documents,
-            persist_to_dataplex_catalog: persistToDataplex,
-            stage_for_review: stageForReview,
-          },
-          client_settings: {
-            project_id: params.client_settings.project_id,
-            llm_location: params.client_settings.llm_location,
-            dataplex_location: params.client_settings.dataplex_location,
-          },
-          table_settings: {
-            project_id: params.table_settings.project_id,
-            dataset_id: params.table_settings.dataset_id,
-            table_id: params.table_settings.table_id,
-            documentation_uri: params.table_settings.documentation_uri,
-          },
-        }
+        requestBody
       );
       setApiResponse(response.data);
+      setIsGenerating(false);
     } catch (error) {
       console.error("API Error:", error);
-      console.error("Error Message:", error.message);
-      setApiResponse({ error: "Network Error or API issue" });
+      if (error.response) {
+        console.error("Response data:", error.response.data);
+        console.error("Response status:", error.response.status);
+        console.error("Response headers:", error.response.headers);
+      } else if (error.request) {
+        console.error("Request:", error.request);
+      } else {
+        console.error("Error message:", error.message);
+      }
+      setApiResponse({ error: "Network Error or API issue. Check console for details." });
+      setIsGenerating(false);
     }
   };
 
@@ -355,10 +382,14 @@ function App() {
         />
       </Box>
 
-      {apiResponse && (
+      {(isGenerating || apiResponse) && (
         <div className="response-section">
           <h2>API Response:</h2>
-          <pre>{JSON.stringify(apiResponse, null, 2)}</pre>
+          {isGenerating ? (
+            <div>Generating...</div>
+          ) : (
+            <pre>{JSON.stringify(apiResponse, null, 2)}</pre>
+          )}
         </div>
       )}
     </div>

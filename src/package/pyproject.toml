@@ -33,7 +33,7 @@ dependencies = [
     "google-cloud-bigquery==3.21.0",
     "google-cloud-datacatalog==3.19.0",
     "google-cloud-datacatalog-lineage==0.3.6",
-    "google-cloud-dataplex==1.13.0",
+    "google-cloud-dataplex==2.3.1",
     "google-cloud-aiplatform>=1.48.0"
 
 ]

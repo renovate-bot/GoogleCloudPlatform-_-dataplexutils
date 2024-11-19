@@ -56,6 +56,7 @@ def _call_api(
     METADATA_TABLE_SCOPE_ROUTE = "/generate_table_description"
     METADATA_COLUMNS_SCOPE_ROUTE = "/generate_columns_descriptions"
     METADATA_DATASET_SCOPE_ROUTE = "/generate_dataset_tables_descriptions"
+    METADATA_DATASET_COLUMNS_SCOPE_ROUTE = "/generate_dataset_tables_columns_descriptions"
 
     if debug:
         API_URL = API_URL_DEBUG
@@ -65,6 +66,11 @@ def _call_api(
         url = API_URL + METADATA_COLUMNS_SCOPE_ROUTE
     elif scope == "dataset":
         url = API_URL + METADATA_DATASET_SCOPE_ROUTE
+    elif scope == "dataset_columns":
+        url = API_URL + METADATA_DATASET_COLUMNS_SCOPE_ROUTE
+    else:
+        raise ValueError(f"Invalid scope: {scope}")
+
 
     params = {
         "client_options_settings": {
@@ -211,7 +217,7 @@ def _get_input_arguments():
         dest="strategy",
         required=False,
         type=str,
-        default="1"
+        default="NAIVE"
         )
 
     parser.add_argument(
@@ -278,8 +284,8 @@ def main():
         table_dataset_id,
         table_id,
         debug,
+        documentation_csv_uri,
         strategy,
-        documentation_csv_uri
     )
 
 if __name__ == "__main__":
