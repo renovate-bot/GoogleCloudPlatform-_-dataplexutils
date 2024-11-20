@@ -28,6 +28,8 @@ import pkgutil
 import re
 import json
 import pandas
+import time
+import datetime
 from enum import Enum
 
 # Cloud imports
@@ -190,7 +192,7 @@ class ClientOptions:
         use_data_quality=False,
         use_ext_documents=False,
         persist_to_dataplex_catalog=True,
-        stage_for_review=False,
+        stage_for_review=False
     ):
         self._use_lineage_tables = use_lineage_tables
         self._use_lineage_processes = use_lineage_processes
@@ -377,7 +379,7 @@ class Client:
             raise e
 
 
-    def generate_table_description(self, table_fqn, documentation_uri=None):
+    def generate_table_description(self, table_fqn, documentation_uri=None,human_comments=None):
         """Generates metadata on the tabes.
 
         Args:
@@ -437,6 +439,7 @@ class Client:
             table_quality=table_quality,
             table_sources_info=table_sources_info,
             job_sources_info=job_sources_info,
+            human_comments=human_comments
         )
         #logger.info(f"Prompt used is: {table_description_prompt_expanded}.")
         table_description = self._llm_inference(table_description_prompt_expanded,documentation_uri)
@@ -456,7 +459,7 @@ class Client:
             None
         return "Table description generated successfully"
 
-    def generate_columns_descriptions(self, table_fqn,documentation_uri=None):
+    def generate_columns_descriptions(self, table_fqn,documentation_uri=None,human_comments=None):
         """Generates metadata on the columns.
 
         Args:
@@ -517,6 +520,7 @@ class Client:
                     table_quality=table_quality,
                     table_sources_info=table_sources_info,
                     job_sources_info=job_sources_info,
+                    human_comments=human_comments
                 )
                 #logger.info(f"Prompt used is: {column_description_prompt_expanded}.")
                 column_description = self._llm_inference(
@@ -1147,46 +1151,53 @@ class Client:
             raise e
 
     def _llm_inference(self, prompt, documentation_uri=None):
-        try:
-            vertexai.init(project=self._project_id, location=self.llm_location)
-            if self._client_options._use_ext_documents:
-                model = GenerativeModel(constants["LLM"]["LLM_VISION_TYPE"])
-            else:
-                model = GenerativeModel(constants["LLM"]["LLM_TYPE"])
+        retries=3
+        base_delay=1
+        for attempt in range(retries+1):
+            try:
+                vertexai.init(project=self._project_id, location=self.llm_location)
+                if self._client_options._use_ext_documents:
+                    model = GenerativeModel(constants["LLM"]["LLM_VISION_TYPE"])
+                else:
+                    model = GenerativeModel(constants["LLM"]["LLM_TYPE"])
 
-            generation_config = GenerationConfig(
-                temperature=constants["LLM"]["TEMPERATURE"],
-                top_p=constants["LLM"]["TOP_P"],
-                top_k=constants["LLM"]["TOP_K"],
-                candidate_count=constants["LLM"]["CANDIDATE_COUNT"],
-                max_output_tokens=constants["LLM"]["MAX_OUTPUT_TOKENS"],
-            )
-            safety_settings = {
-                generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                generative_models.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                generative_models.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            }
-            if documentation_uri != None:
-                doc = Part.from_uri(
-                    documentation_uri, mime_type=constants["DATA"]["PDF_MIME_TYPE"]
+                generation_config = GenerationConfig(
+                    temperature=constants["LLM"]["TEMPERATURE"],
+                    top_p=constants["LLM"]["TOP_P"],
+                    top_k=constants["LLM"]["TOP_K"],
+                    candidate_count=constants["LLM"]["CANDIDATE_COUNT"],
+                    max_output_tokens=constants["LLM"]["MAX_OUTPUT_TOKENS"],
                 )
-                responses = model.generate_content(
-                    [doc, prompt],
-                    generation_config=generation_config,
-                    safety_settings=safety_settings,
-                    stream=False,
-                )
-            else:
-                responses = model.generate_content(
-                    prompt,
-                    generation_config=generation_config,
-                    stream=False,
-                )
-            return responses.text
-        except Exception as e:
-            logger.error(f"Exception: {e}.")
-            raise e
+                safety_settings = {
+                    generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    generative_models.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    generative_models.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    }
+                if documentation_uri != None:
+                    doc = Part.from_uri(
+                        documentation_uri, mime_type=constants["DATA"]["PDF_MIME_TYPE"]
+                    )
+                    responses = model.generate_content(
+                        [doc, prompt],
+                        generation_config=generation_config,
+                        safety_settings=safety_settings,
+                        stream=False,
+                    )
+                else:
+                    responses = model.generate_content(
+                        prompt,
+                        generation_config=generation_config,
+                        stream=False,
+                    )
+                return responses.text
+            except Exception as e:
+                if attempt == retries:
+                    logger.error(f"Exception: {e}.")
+                    raise e
+                else:
+                    # Exponential backoff - wait longer between each retry attempt
+                    time.sleep(base_delay * (2 ** attempt))
 
     def _get_table_description(self, table_fqn):
         """Retrieves the current description of a BigQuery table.
@@ -1265,6 +1276,7 @@ class Client:
             print(f"aspect: {aspect}")
             aspect= entry.aspects[aspect]
             if aspect.aspect_type.endswith(f"""aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""):
+                
                 for i in aspect.data:
                     if i == "contents":
                         overview=aspect.data[i]
@@ -1360,7 +1372,40 @@ class Client:
         Raises:
             Add stringdocs
         """
-        None
+        from typing import MutableSequence
+
+        # Create a client
+        client = self._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+        client = dataplex_v1.CatalogServiceClient()
+
+
+        aspect_types = [f"""projects/{self._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""]
+        # Create the aspect
+        project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
+
+        entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+
+        aspect=dataplex_v1.Aspect()
+        request=dataplex_v1.GetEntryRequest(name=entry_name,view=dataplex_v1.EntryView.CUSTOM,aspect_types=aspect_types)
+        overview=None
+        try:
+            entry = client.get_entry(request=request)
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+        comments=[]
+        for aspect in entry.aspects:
+            logger.info(f"aspect: {aspect}")
+            aspect= entry.aspects[aspect]
+            logger.info(f"aspect.aspect_type: {aspect.aspect_type}")
+            logger.info(f"aspect.path: {aspect.path}")
+            if aspect.aspect_type.endswith(f"""aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}""") and aspect.path=="":
+                for i in aspect.data:
+                    if i == "human-comments":
+                        comments.extend(aspect.data[i])
+
+        logger.info(f"comments: {comments}")                
+        self.generate_table_description(table_fqn,human_comments=comments)
     
     def regenerate_column_description(self, table_fqn):
         """Add Moves description from draft aspect to dataplex Overview and BQ
@@ -1373,6 +1418,28 @@ class Client:
         """
         None
 
+    def get_comment_to_table_draft_description(self, table_fqn):
+        """Add Moves description from draft aspect to dataplex Overview and BQ
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
+        None
+
+
+    def get_negative_examples_to_table_draft_description(self, table_fqn):
+        """Add Moves description from draft aspect to dataplex Overview and BQ
+
+        Args:
+            Add stringdocs
+
+        Raises:
+            Add stringdocs
+        """
+        None
     
     def add_comment_to_table_draft_description(self, table_fqn):
         """Add Moves description from draft aspect to dataplex Overview and BQ
@@ -1459,7 +1526,7 @@ class Client:
         #client = dataplex_v1.CatalogServiceClient()
 
         # Load the TOML file for aspect content
-        aspect_content = {
+        new_aspect_content = {
             "certified" : "false",
             "user-who-certified" : "John Doe",
             "contents" : description,
@@ -1470,32 +1537,55 @@ class Client:
             "external-document-uri": "gs://example.com/document"
         }
 
-        print(f"aspect_content: {aspect_content}")
+        print(f"aspect_content: {new_aspect_content}")
         # Create the aspect
-        aspect = dataplex_v1.Aspect()
-        aspect.aspect_type = f"""projects/{self._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""
-        #aspect.aspect_type = f"{project_id}/global/{aspect_type_id}"
+        new_aspect = dataplex_v1.Aspect()
+        new_aspect.aspect_type = f"""projects/{self._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""
+        aspect_name=f"""{self._project_id}.global.{constants["ASPECT_TEMPLATE"]["name"]}"""
+        aspect_types = [new_aspect.aspect_type]
 
 
-
-        # Convert aspect_content to a Struct
-        data_struct = struct_pb2.Struct()
-        data_struct.update(aspect_content)
-        aspect.data = data_struct
-        
         project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
-        print(f"project_id: {project_id}, dataset_id: {dataset_id}, table_id: {table_id}")
-
 
         entry = dataplex_v1.Entry()
         entry.name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
-        entry.aspects[f"""{project_id}.global.{constants["ASPECT_TEMPLATE"]["name"]}"""] = aspect
+        #entry.aspects[f"""{project_id}.global.{constants["ASPECT_TEMPLATE"]["name"]}"""] = aspect
+        # Check if the aspect already exists
+        try:
+            get_request=dataplex_v1.GetEntryRequest(name=entry.name,view=dataplex_v1.EntryView.CUSTOM,aspect_types=aspect_types)
+            entry = client.get_entry(request=get_request)
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
 
-        # Initialize request argument(s)
+        data_struct = struct_pb2.Struct()
+        data_struct.update(new_aspect_content)
+        new_aspect.data = data_struct
+        for i in entry.aspects:
+            logger.info(f"""i: {i} path: "{entry.aspects[i].path}" """)
+            if i.endswith(f"""global.{constants["ASPECT_TEMPLATE"]["name"]}""") and entry.aspects[i].path=="":
+                logger.info(f"Updating aspect {i} with old_values")
+                new_aspect.data=entry.aspects[i].data
+                new_aspect.data.update({"contents": description,
+                                "generation-date" : datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "to-be-regenerated" : "false"
+                                }
+                                )
+                logger.info(f"entry.aspects[aspect_name].data: {entry.aspects[i].data}")
+                logger.info(f"new_aspect.data: {new_aspect.data}")
+            #new_aspect.data=entry.aspects[i].data
+
+
+        new_entry=dataplex_v1.Entry()
+        new_entry.name=entry.name
+        new_entry.aspects[aspect_name]=new_aspect
+
+        # Initialize request argument(s)  
         request = dataplex_v1.UpdateEntryRequest(
-            entry=entry,
-            update_mask=field_mask_pb2.FieldMask(paths=["aspects"]),
+            entry=new_entry,
+            update_mask=field_mask_pb2.FieldMask(paths=["aspects"]), 
             allow_missing=False,
+            aspect_keys=[aspect_name]
         )
         # Make the request
         try:
@@ -1505,6 +1595,19 @@ class Client:
         except Exception as e:
             print(f"Failed to create aspect: {e}")
             return False
+
+        return True
+
+
+
+
+
+ 
+        
+
+
+
+        
 
         
 

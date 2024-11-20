@@ -59,10 +59,12 @@ The attached documents provide additional information about this table and the s
 """
 TABLE_DESCRIPTION_GENERATION_BASE = """
 Describe the contents and purpose of the table.
+Do not include name of the table because that is already provided elsewhere.
 Describe table contents, business area and how the table can be used.
 Explain granularity of the data in the table.
 Do not include the description of the columns or data elements because they will be provided separately.
 Do not base the description just on the provided table sample but use all available information.
+Take into consideration the comments provided by the user which are more important than other information: {human_comments}
 """
 TABLE_DESCRIPTION_GENERATION_LINEAGE = """
 Provide information how is that table is calculated from originating tables, mentiones level of aggregation,
@@ -89,6 +91,8 @@ Is this column a primary key
 
 Describe only this column content. When proving most frequent values, provide 10 most frequent values based on the profile information.
 You MUST Use quotes to enclose the values.
+Take into consideration the comments provided by the user. They are more important than other information: {human_comments}
+
 Examples of values:
 ###
 This column represents the date partition of the accident records.  It is likely used for partitioning the table to improve query performance and reduce storage costs.
