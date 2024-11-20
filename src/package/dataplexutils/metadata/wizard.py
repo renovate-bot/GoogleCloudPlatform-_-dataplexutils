@@ -1562,7 +1562,6 @@ class Client:
         data_struct.update(new_aspect_content)
         new_aspect.data = data_struct
         for i in entry.aspects:
-            logger.info(f"""i: {i} path: "{entry.aspects[i].path}" """)
             if i.endswith(f"""global.{constants["ASPECT_TEMPLATE"]["name"]}""") and entry.aspects[i].path=="":
                 logger.info(f"Updating aspect {i} with old_values")
                 new_aspect.data=entry.aspects[i].data
@@ -1623,15 +1622,12 @@ class Client:
             Exception: If there is an error updating the column description in Dataplex
         """
 
-        # Create a client
+                # Create a client
         client = self._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
         #client = dataplex_v1.CatalogServiceClient()
 
         # Load the TOML file for aspect content
-
-        #TODO: Add external document uri
-        #TODO: Add generation date
-        aspect_content = {
+        new_aspect_content = {
             "certified" : "false",
             "user-who-certified" : "John Doe",
             "contents" : description,
@@ -1642,32 +1638,54 @@ class Client:
             "external-document-uri": "gs://example.com/document"
         }
 
-        print(f"aspect_content: {aspect_content}")
+        print(f"aspect_content: {new_aspect_content}")
         # Create the aspect
-        aspect = dataplex_v1.Aspect()
-        aspect.aspect_type = f"""projects/{self._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""
-        #aspect.aspect_type = f"{project_id}/global/{aspect_type_id}"
+        new_aspect = dataplex_v1.Aspect()
+        new_aspect.aspect_type = f"""projects/{self._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""
+        aspect_name=f"""{self._project_id}.global.{constants["ASPECT_TEMPLATE"]["name"]}@Schema.{column_name}"""
+        aspect_types = [new_aspect.aspect_type]
 
 
-
-        # Convert aspect_content to a Struct
-        data_struct = struct_pb2.Struct()
-        data_struct.update(aspect_content)
-        aspect.data = data_struct
-        
         project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
-        #print(f"project_id: {project_id}, dataset_id: {dataset_id}, table_id: {table_id}")
-
 
         entry = dataplex_v1.Entry()
         entry.name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
-        entry.aspects[f"""{project_id}.global.{constants["ASPECT_TEMPLATE"]["name"]}@Schema.{column_name}"""] = aspect
+        #entry.aspects[f"""{project_id}.global.{constants["ASPECT_TEMPLATE"]["name"]}"""] = aspect
+        # Check if the aspect already exists
+        try:
+            get_request=dataplex_v1.GetEntryRequest(name=entry.name,view=dataplex_v1.EntryView.CUSTOM,aspect_types=aspect_types)
+            entry = client.get_entry(request=get_request)
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
 
-        # Initialize request argument(s)
+        data_struct = struct_pb2.Struct()
+        data_struct.update(new_aspect_content)
+        new_aspect.data = data_struct
+        for i in entry.aspects:
+            logger.info(f"""i: {i} path: "{entry.aspects[i].path}" """)
+            if i.endswith(f"""global.{constants["ASPECT_TEMPLATE"]["name"]}@Schema.{column_name}""") and entry.aspects[i].path==f"Schema.{column_name}" :
+                logger.info(f"Updating aspect {i} with new values")
+                new_aspect.data=entry.aspects[i].data
+                new_aspect.data.update({"contents": description,
+                                "generation-date" : datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "to-be-regenerated" : "false"
+                                }
+                                )
+
+            #new_aspect.data=entry.aspects[i].data
+
+
+        new_entry=dataplex_v1.Entry()
+        new_entry.name=entry.name
+        new_entry.aspects[aspect_name]=new_aspect
+
+        # Initialize request argument(s)  
         request = dataplex_v1.UpdateEntryRequest(
-            entry=entry,
-            update_mask=field_mask_pb2.FieldMask(paths=["aspects"]),
+            entry=new_entry,
+            update_mask=field_mask_pb2.FieldMask(paths=["aspects"]), 
             allow_missing=False,
+            aspect_keys=[aspect_name]
         )
         # Make the request
         try:
@@ -1677,6 +1695,8 @@ class Client:
         except Exception as e:
             print(f"Failed to create aspect: {e}")
             return False
+
+        return True
 
     def _promote_table_description_from_draft(self, table_fqn, description):
         """Add stringdocs
