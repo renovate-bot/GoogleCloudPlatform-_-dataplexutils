@@ -192,7 +192,8 @@ class ClientOptions:
         use_data_quality=False,
         use_ext_documents=False,
         persist_to_dataplex_catalog=True,
-        stage_for_review=False
+        stage_for_review=False,
+        add_ai_warning=True
     ):
         self._use_lineage_tables = use_lineage_tables
         self._use_lineage_processes = use_lineage_processes
@@ -201,7 +202,7 @@ class ClientOptions:
         self._use_ext_documents = use_ext_documents
         self._persist_to_dataplex_catalog = persist_to_dataplex_catalog
         self._stage_for_review = stage_for_review
-
+        self._add_ai_warning = add_ai_warning
 
 class Client:
     """Represents the main metadata wizard client."""
@@ -443,6 +444,8 @@ class Client:
         )
         #logger.info(f"Prompt used is: {table_description_prompt_expanded}.")
         table_description = self._llm_inference(table_description_prompt_expanded,documentation_uri)
+        if self._client_options._add_ai_warning==True:
+            table_description = f"{constants['OUTPUT_CLAUSES']['AI_WARNING']}{table_description}"
         #logger.info(f"Generated description: {table_description}.")
         
         # Update table
@@ -527,6 +530,9 @@ class Client:
                     column_description_prompt_expanded,
                     documentation_uri=documentation_uri,
                 )
+                if self._client_options._add_ai_warning==True:
+                    column_description = f"{constants['OUTPUT_CLAUSES']['AI_WARNING']}{column_description}"
+
                 updated_schema.append(
                     self._get_updated_column(column, column_description)
                 )
@@ -631,6 +637,11 @@ class Client:
         """
         try:
             # Get the fields from the first profile
+            
+            if not profile or len(profile) == 0:
+                logger.info(f"No profile found for column {column_name}.")
+                return None
+            
             fields = profile[0]['profile']['fields']
             
             # Find the matching column
@@ -885,7 +896,8 @@ class Client:
         try:
             table_profile = self._get_table_profile_quality(use_enabled, table_fqn)["data_profile"]
             if not table_profile:
-                self._client_options._use_profile = False
+                logger.info(f"No profile found for table in datascans{table_fqn}.")
+                #self._client_options._use_profile = False
             return table_profile
         except Exception as e:
             logger.error(f"Exception: {e}.")
@@ -911,7 +923,8 @@ class Client:
             # not data quality information to return, we disable the client
             # options flag so the prompt do not include this.
             if not table_quality:
-                self._client_options._use_data_quality = False
+                logger.info(f"No quality check found for table in datascans{table_fqn}.")
+                #self._client_options._use_data_quality = False
             return table_quality
         except Exception as e:
             logger.error(f"Exception: {e}.")
@@ -1597,18 +1610,7 @@ class Client:
 
         return True
 
-
-
-
-
- 
-        
-
-
-
-        
-
-        
+  
 
     def _update_column_draft_description(self, table_fqn, column_name, description):
         """Updates the draft description for a column from a BigQuery table in Dataplex.

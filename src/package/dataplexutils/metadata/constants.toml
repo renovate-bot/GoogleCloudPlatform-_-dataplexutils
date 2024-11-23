@@ -28,6 +28,10 @@ TOP_P = 1.0
 TOP_K = 32
 CANDIDATE_COUNT = 1
 MAX_OUTPUT_TOKENS = 2048
+
+[OUTPUT_CLAUSES]
+AI_WARNING = "AI generated description.\n"
+
 [PROMPTS]
 SYSTEM_PROMPT = """
 You are a data steward. Your task is to produce human meaningful metadata.

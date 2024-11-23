@@ -75,6 +75,7 @@ def generate_table_description(
     client_options_settings: ClientOptionsSettings = Body(),
     client_settings: ClientSettings = Body(),
     table_settings: TableSettings = Body(),
+    dataset_settings: DatasetSettings = Body(),
 ):
  
     """
@@ -127,6 +128,7 @@ def generate_columns_descriptions(
     client_options_settings: ClientOptionsSettings = Body(),
     client_settings: ClientSettings = Body(),
     table_settings: TableSettings = Body(),
+    dataset_settings: DatasetSettings = Body(),
 ):
     try:
         client_options = ClientOptions(
@@ -239,8 +241,7 @@ def generate_dataset_tables_columns_descriptions(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,        
-            client_options=client_options,
-            
+            client_options=client_options,            
         )
 
         dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"

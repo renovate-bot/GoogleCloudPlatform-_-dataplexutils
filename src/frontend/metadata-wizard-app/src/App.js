@@ -139,16 +139,14 @@ function App() {
           table_id: params.table_settings.table_id,
           documentation_uri: params.table_settings.documentation_uri,
         },
-      };
-
-      if (endpoint === 'generate_dataset_tables_descriptions') {
-        requestBody.dataset_settings = {
+        dataset_settings: {
           project_id: params.dataset_settings.project_id,
           dataset_id: params.dataset_settings.dataset_id,
           documentation_csv_uri: params.dataset_settings.documentation_csv_uri,
           strategy: params.dataset_settings.strategy,
-        };
-      }
+        },
+      };
+
 
       console.log("Sending request to:", `${apiUrlBase}/${endpoint}`);
       console.log("Request body:", JSON.stringify(requestBody, null, 2));
@@ -248,9 +246,9 @@ function App() {
             onChange={handleChange}
             fullWidth
           >
-            <MenuItem value="1">Naive</MenuItem>
-            <MenuItem value="2">Documented</MenuItem>
-            <MenuItem value="3">Documented and then rest</MenuItem>
+            <MenuItem value="NAIVE">Naive</MenuItem>
+            <MenuItem value="DOCUMENTED">Documented</MenuItem>
+            <MenuItem value="DOCUMENTED_AND_REST">Documented and then rest</MenuItem>
           </Select>
         </div>
           
@@ -290,9 +288,9 @@ function App() {
           </div>
           <div>
             <TextField
-              label="Documentation URI"
-              id="client_settings.documentation_uri"
-              name="client_settings.documentation_uri"
+              label="Table Documentation URI"
+              id="table_settings.documentation_uri"
+              name="table_settings.documentation_uri"
               value={params.table_settings.documentation_uri}
               onChange={handleChange}
               fullWidth
@@ -300,10 +298,10 @@ function App() {
           </div>
           <div>
             <TextField
-              label="Documentation CSV URI"
-              id="dataset_settings.documentation_uri"
-              name="dataset_settings.documentation_uri"
-              value={params.dataset_settings.documentation_uri}
+              label="Dataset Documentation CSV URI"
+              id="dataset_settings.documentation_csv_uri"
+              name="dataset_settings.documentation_csv_uri"
+              value={params.dataset_settings.documentation_csv_uri}
               onChange={handleChange}
               fullWidth
             />
@@ -358,16 +356,26 @@ function App() {
         </Box>
       </Box>
 
-      <Box >
-        <Button variant="contained" onClick={() => callApi('generate_table_description')}>
-          Generate Table Description
-        </Button>
-        <Button variant="contained" onClick={() => callApi('generate_columns_descriptions')}>
-          Generate Column Descriptions
-        </Button>
-        <Button variant="contained" onClick={() => callApi('generate_dataset_tables_descriptions')}>
-          Generate All Tables in Dataset Descriptions
-        </Button>
+      <Box sx={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          <h3>Generate for single table</h3>
+          <Button variant="contained" onClick={() => callApi('generate_table_description')}>
+            Table Description
+          </Button>
+          <Button variant="contained" onClick={() => callApi('generate_columns_descriptions')}>
+            Column Descriptions
+          </Button>
+        </Box>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          <h3>Generate for dataset</h3>
+          <Button variant="contained" onClick={() => callApi('generate_dataset_tables_descriptions')}>
+            All Tables in Dataset
+          </Button>
+          <Button variant="contained" onClick={() => callApi('generate_dataset_tables_columns_descriptions')}>
+            All Tables and Columns
+          </Button>
+        </Box>
       </Box>
 
       <Box className="settings-section">
