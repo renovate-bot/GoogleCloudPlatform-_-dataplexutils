@@ -385,7 +385,11 @@ function App() {
           label="Persist Table description to Dataplex Catalog"
         />
         <FormControlLabel
-          control={<Checkbox checked={stageForReview} onChange={handleStageForReviewChange} />}
+          control={<Checkbox 
+            checked={stageForReview} 
+            onChange={handleStageForReviewChange}
+            disabled={true}
+          />}
           label="Stage generations in Dataplex for Review"
         />
       </Box>

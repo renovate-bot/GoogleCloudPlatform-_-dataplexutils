@@ -30,7 +30,7 @@ CANDIDATE_COUNT = 1
 MAX_OUTPUT_TOKENS = 2048
 
 [OUTPUT_CLAUSES]
-AI_WARNING = "AI generated description.\n"
+AI_WARNING = "===AI generated description===\n"
 
 [PROMPTS]
 SYSTEM_PROMPT = """
@@ -68,13 +68,16 @@ Describe table contents, business area and how the table can be used.
 Explain granularity of the data in the table.
 Do not include the description of the columns or data elements because they will be provided separately.
 Do not base the description just on the provided table sample but use all available information.
-Take into consideration the comments provided by the user which are more important than other information: {human_comments}
 """
 TABLE_DESCRIPTION_GENERATION_LINEAGE = """
 Provide information how is that table is calculated from originating tables, mentiones level of aggregation,
 which tables are joined, what data is filtered, what are most sifgnificant data transformations.
 If there's no lineage information then second paragraph is ommited.
 """
+TABLE_DESCRIPTION_PROMPT_HUMAN_COMMENTS = """
+Take into consideration the comments provided by the user about this table. They are more important than other information: {human_comments}
+"""
+
 OUTPUT_FORMAT_PROMPT = """
 Do not use markdown, or do not the keywords like SQL at the beginning of answer, do not use quotes to enclose the response.
 """
@@ -87,7 +90,7 @@ The table full schema is {table_schema_str}
 
 
 Please answer in the following format:
-Description
+Description of the column
 10 Most frequent values 
 Type of column
 Categorical column or measure
@@ -127,6 +130,10 @@ Categorical
 Is this column a primary key
 No
 """
+COLUMN_DESCRIPTION_PROMPT_HUMAN_COMMENTS = """
+Take into consideration the comments provided by the user about this column. They are more important than other information: {human_comments}
+"""
+
 [DATA]
 NUM_ROWS_TO_SAMPLE = 0
 MAX_COLUMN_DESC_LENGTH = 1024
