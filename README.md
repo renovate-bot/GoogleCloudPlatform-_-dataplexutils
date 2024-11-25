@@ -64,3 +64,120 @@ src/cli/install_cli.sh
 ```bash
 src/frontend/metadata-wizard-app/build_local.sh
 ```
+
+
+
+## Providing external documentation
+
+External documentation can be provided in two formats:
+* CSV file with links to PDF documents
+* PDF document
+
+### CSV file with links to PDF documents
+File should have two columns:
+* table_id
+* documentation_uri
+columns separated by commas.
+Each row in the file represents a table.
+
+File should be stored in Google Cloud Storage.
+
+example csv file content: 
+
+```
+car_crashes,gs://wizard-documents/Data 360 Documentation - Dataflix - olderdocs.pdf
+accident,gs://wizard-documents/Data 360 Documentation - Dataflix - olderdocs.pdf
+```
+
+### PDF document
+
+Can be used as a reference for the LLM to generate more accurate descriptions when generating single table-level descriptions.
+File should be stored in Google Cloud Storage.
+example file path:
+
+```
+gs://wizard-documents/Data 360 Documentation - Dataflix - olderdocs.pdf
+```
+
+## Using CLI and example CLI commands
+
+```bash
+metadata-wizard --help
+```
+To use CLI you need to have installed metadata-wizard package. To use local deployment you need to have backend_apis deployed. For local deployment use --debug TRUE flag.
+
+
+Calling metadata wizard CLI to generate metadata for all tables and all columns in a dataset:
+
+```bash
+metadata-wizard --service localhost:8000 --scope dataset --dataplex_project_id <dataplex_project_id> --llm_location <llm_location> --dataplex_location <dataplex_location> --table_project_id <table_project_id> --table_dataset_id <table_dataset_id> --strategy <strategy> --use_lineage_tables TRUE  --use_lineage_processes TRUE --use_profile TRUE --use_data_quality TRUE --use_ext_documents TRUE 
+```
+
+
+
+### Generate Basic Table Description
+Generate metadata for a single table:
+```bash
+metadata-wizard --service localhost:8000 \
+  --scope table \
+  --dataplex_project_id <project_id> \
+  --llm_location us-central1 \
+  --dataplex_location us-central1 \
+  --table_project_id <project_id> \
+  --table_dataset_id <dataset_id> \
+  --table_id <table_id> \
+  --debug TRUE
+```
+
+### Dataset-Level Description with PDF Documentation
+Generate metadata for all tables in a dataset using a CSV file with links to PDF document as reference:
+```bash
+metadata-wizard --service localhost:8000 \
+  --scope dataset \
+  --dataplex_project_id <project_id> \
+  --llm_location us-central1 \
+  --dataplex_location us-central1 \
+  --table_project_id <project_id> \
+  --table_dataset_id <dataset_id> \
+  --documentation_csv_uri "gs://your-bucket/your-documentation.csv" \
+  --strategy NAIVE \
+  --debug TRUE
+```
+
+### Dataset Columns with CSV Documentation
+Generate column descriptions for all tables in a dataset using a CSV mapping file:
+```bash
+metadata-wizard --service localhost:8000 \
+  --scope dataset_columns \
+  --dataplex_project_id <project_id> \
+  --llm_location us-central1 \
+  --dataplex_location us-central1 \
+  --table_project_id <project_id> \
+  --table_dataset_id <dataset_id> \
+  --documentation_csv_uri "gs://your-bucket/column-mappings.csv" \
+  --strategy DOCUMENTED \
+  --debug TRUE
+```
+
+### Comprehensive Table and Column Analysis
+Generate descriptions using all available information sources:
+```bash
+metadata-wizard --service localhost:8000 \
+  --scope columns \
+  --dataplex_project_id <project_id> \
+  --llm_location us-central1 \
+  --dataplex_location us-central1 \
+  --table_project_id <project_id> \
+  --table_dataset_id <dataset_id> \
+  --table_id <table_id> \
+  --documentation_uri "gs://your-bucket/documentation.pdf" \
+  --use_lineage_tables TRUE \
+  --use_lineage_processes TRUE \
+  --use_profile TRUE \
+  --use_data_quality TRUE \
+  --use_ext_documents TRUE \
+  --debug TRUE
+```
+
+# Customizing metadata generation
+All prompt templates are located in **constants.toml** file in metadata package. Modify them to generate expected shape of metadata. 

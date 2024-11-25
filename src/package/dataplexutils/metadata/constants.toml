@@ -17,16 +17,21 @@
 BIGQUERY = "bigquery"
 DATAPLEX_DATA_SCAN = "dataplex_data_scan"
 DATA_CATALOG_LINEAGE = "data_catalog_lineage"
+DATAPLEX_CATALOG = "dataplex_catalog"
 [LOGGING]
 WIZARD_LOGGER = "wizard_logger"
 [LLM]
-LLM_TYPE = "gemini-1.5-pro-001"
-LLM_VISION_TYPE = "gemini-1.5-pro-001"
+LLM_TYPE = "gemini-1.5-pro-002"
+LLM_VISION_TYPE = "gemini-1.5-pro-002"
 TEMPERATURE = 0.0
 TOP_P = 1.0
 TOP_K = 32
 CANDIDATE_COUNT = 1
 MAX_OUTPUT_TOKENS = 2048
+
+[OUTPUT_CLAUSES]
+AI_WARNING = "===AI generated description===\n"
+
 [PROMPTS]
 SYSTEM_PROMPT = """
 You are a data steward. Your task is to produce human meaningful metadata.
@@ -35,7 +40,7 @@ TABLE_DESCRIPTION_PROMPT_BASE = """
 You need to produce metadata for a table.
 The table fully qualified name is  {table_fqn}
 The table schema is {table_schema_str}
-A sample of the rows is {table_sample}
+
 """
 TABLE_DESCRIPTION_PROMPT_PROFILE = """
 The table profile information is {table_profile}
@@ -57,28 +62,78 @@ TABLE_DESCRIPTION_PROMPT_DOCUMENT = """
 The attached documents provide additional information about this table and the source tables. 
 """
 TABLE_DESCRIPTION_GENERATION_BASE = """
-The first paragraph starts with **Description** and then describe the contents and purpose of the table.
+Describe the contents and purpose of the table.
+Do not include name of the table because that is already provided elsewhere.
 Describe table contents, business area and how the table can be used.
-Do not include the description of the columns or data elements.
-Do not base the description just on the provided table sample.
+Explain granularity of the data in the table.
+Do not include the description of the columns or data elements because they will be provided separately.
+Do not base the description just on the provided table sample but use all available information.
 """
 TABLE_DESCRIPTION_GENERATION_LINEAGE = """
-The second paragraph starts with **Source** and provide information how is that table is calculated from originating tables, mentiones level of aggregation,
-which tables are joined, what data is filterd, what are most sifgnificant data transformations.
+Provide information how is that table is calculated from originating tables, mentiones level of aggregation,
+which tables are joined, what data is filtered, what are most sifgnificant data transformations.
 If there's no lineage information then second paragraph is ommited.
 """
+TABLE_DESCRIPTION_PROMPT_HUMAN_COMMENTS = """
+Take into consideration the comments provided by the user about this table. They are more important than other information: {human_comments}
+"""
+
 OUTPUT_FORMAT_PROMPT = """
 Do not use markdown, or do not the keywords like SQL at the beginning of answer, do not use quotes to enclose the response.
 """
 COLUMN_DESCRIPTION_PROMPT_BASE = """
-You need to produce short metadata in a form of description for a column of a table.
+You need to produce metadata description in a form of description for a column of a table.
 Input data:
 The column that is described  is {column_name}
 The table fully qualified name is  {table_fqn}
 The table full schema is {table_schema_str}
-A sample of the rows is {table_sample}
-Describe only this column content. Please use approx 50 words only
+
+
+Please answer in the following format:
+Description of the column
+10 Most frequent values 
+Type of column
+Categorical column or measure
+Is this column a primary key
+
+Describe only this column content. When proving most frequent values, provide 10 most frequent values based on the profile information.
+You MUST Use quotes to enclose the values.
+Take into consideration the comments provided by the user. They are more important than other information: {human_comments}
+
+Examples of values:
+###
+This column represents the date partition of the accident records.  It is likely used for partitioning the table to improve query performance and reduce storage costs.
+
+10 Most frequent values: 
+'2023-01-01'; '2023-01-02'; '2023-01-03'; '2023-01-05';
+
+Type of column
+DATE
+
+Categorical column or measure
+Categorical
+
+Is this column a primary key
+No
+###
+This column indicates the type of driver impairment, if any, involved in a car crash.  The values represent various conditions affecting the driver's ability to operate a vehicle safely, ranging from no impairment to various forms of impairment such as alcohol or drug influence, fatigue, illness, or other physical or emotional conditions.  The data is sourced from the Fatality Analysis Reporting System (FARS).
+
+10 Most frequent values
+'None/Apparently Normal'; 'Unknown if Impaired'; 'Under the Influence of Alcohol, Drugs or Medication'; 'Not Reported'; 'Asleep or Fatigued'; 'Ill'; 'Blackout'; 'Other Physical Impairment'; 'No Driver Present/Unknown if Driver Present'; 'Physical Impairment – No Details'
+
+Type of column
+STRING
+
+Categorical column or measure
+Categorical
+
+Is this column a primary key
+No
 """
+COLUMN_DESCRIPTION_PROMPT_HUMAN_COMMENTS = """
+Take into consideration the comments provided by the user about this column. They are more important than other information: {human_comments}
+"""
+
 [DATA]
 NUM_ROWS_TO_SAMPLE = 0
 MAX_COLUMN_DESC_LENGTH = 1024
@@ -91,4 +146,90 @@ DOCUMENTED_THEN_REST = 3
 NAIVE_DOCUMENTED_AND_MATCHING_CONFIGURATION = 4
 RANDOM = 8
 ALPHABETICAL = 9
+
+[ASPECT_TEMPLATE]
+type_ = "record"
+name = "metadata-ai-generated"
+display_name = "AI generated metadata draft"
+
+
+[[record_fields]]
+type_ = "bool"
+name = "certified"
+index = 1
+[record_fields.annotations]
+description = "Indicates if the asset has been certified"
+display_name = "Certified"
+
+[[record_fields]]
+type_ = "string"
+name = "user-who-certified"
+index = 2
+[record_fields.annotations]
+description = "User who certified the asset"
+display_name = "User Who Certified"
+
+[[record_fields]]
+type_ = "string"
+name = "contents"
+index = 3
+[record_fields.annotations]
+description = "Generated contents"
+display_name = "Contents"
+string_type = "richText"
+
+[[record_fields]]
+type_ = "datetime"
+name = "generation-date"
+index = 4
+[record_fields.annotations]
+description = "Generation date of the contents"
+display_name = "Generation Date"
+
+[[record_fields]]
+type_ = "bool"
+name = "to-be-regenerated"
+index = 5
+[record_fields.annotations]
+description = "Indicates if the contents should be regenerated"
+display_name = "To be Regenerated"
+
+[[record_fields]]
+type_ = "array"
+name = "human-comments"
+index = 7
+[record_fields.annotations]
+description = "user-comment"
+display_name = "User Comments"
+[record_fields.array_items]
+type_ = "string"
+name = "human-comments"
+[record_fields.array_items.annotations]
+description = "user-comment"
+display_name = "User Comment"
+string_type = "richText"
+
+[[record_fields]]
+type_ = "array"
+name = "negative-examples"
+index = 8
+[record_fields.annotations]
+description = "These are examples of negative results"
+display_name = "BAD examples"
+[record_fields.array_items]
+type_ = "string"
+name = "human-comments"
+[record_fields.array_items.annotations]
+description = "negative-example"
+display_name = "Negative Example"
+string_type = "richText"
+
+[[record_fields]]
+type_ = "string"
+name = "external-document-uri"
+index = 9
+[record_fields.annotations]
+description = "URI of the external document"
+display_name = "External Document URI"
+string_type = "url"
 
