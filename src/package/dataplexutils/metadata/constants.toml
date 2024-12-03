@@ -68,6 +68,8 @@ Describe table contents, business area and how the table can be used.
 Explain granularity of the data in the table.
 Do not include the description of the columns or data elements because they will be provided separately.
 Do not base the description just on the provided table sample but use all available information.
+Here are some examples of good table descriptions:
+
 """
 TABLE_DESCRIPTION_GENERATION_LINEAGE = """
 Provide information how is that table is calculated from originating tables, mentiones level of aggregation,
@@ -95,6 +97,7 @@ Description of the column
 Type of column
 Categorical column or measure
 Is this column a primary key
+SQL formula to calculate the column
 
 Describe only this column content. When proving most frequent values, provide 10 most frequent values based on the profile information.
 You MUST Use quotes to enclose the values.
