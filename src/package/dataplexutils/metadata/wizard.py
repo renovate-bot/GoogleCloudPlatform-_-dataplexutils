@@ -257,7 +257,7 @@ class Client:
         """Regenerates metadata on the tables of a whole dataset.
         """
         self._client_options._use_human_comments=True
-        self._regenerate = True
+        self._client_options._regenerate = True
         return self.generate_dataset_tables_descriptions(dataset_fqn=dataset_fqn, strategy=strategy, documentation_csv_uri=documentation_csv_uri)
 
     def generate_dataset_tables_descriptions(self, dataset_fqn, strategy="NAIVE", documentation_csv_uri=None):
@@ -586,7 +586,7 @@ class Client:
                     job_sources_info=job_sources_info,
                     human_comments=human_comments
                 )
-                if self._regenerate and self._check_if_column_should_be_regenerated(table_fqn,column.name) or not self._regenerate:
+                if self._client_options._regenerate == True and self._check_if_column_should_be_regenerated(table_fqn,column.name) or self._client_options._regenerate == False:
                     #logger.info(f"Prompt used is: {column_description_prompt_expanded}.")
                     column_description = self._llm_inference(
                         column_description_prompt_expanded,
@@ -605,7 +605,7 @@ class Client:
                     updated_schema.append(column)
                     logger.info(f"Column {column.name} will not be updated.")
             self._update_table_schema(table_fqn, updated_schema)
-            if self._regenerate:
+            if self._client_options._regenerate:
                 for column in updated_columns:
                     logger.info(f"Updating table {table_fqn} column {column.name} as regenerated")
                     self._update_column_metadata_as_regenerated(table_fqn,column.name)
