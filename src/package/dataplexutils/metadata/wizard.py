@@ -470,14 +470,22 @@ class Client:
         table_profile = self._get_table_profile(
             self._client_options._use_profile, table_fqn
         )
-        logger.info(f"Getting source tables for table {table_fqn}.")
-        table_sources_info = self._get_table_sources_info(
-            self._client_options._use_lineage_tables, table_fqn
-        )
-        logger.info(f"Getting jobs calculating for table {table_fqn}.")
-        job_sources_info = self._get_job_sources(
-            self._client_options._use_lineage_processes, table_fqn
-        )
+        try:
+            logger.info(f"Getting source tables for table {table_fqn}.")
+            table_sources_info = self._get_table_sources_info(
+                self._client_options._use_lineage_tables, table_fqn
+            )
+        except Exception as e:
+            logger.error(f"Error getting table sources info for table {table_fqn}: {e}")
+            table_sources_info = None
+        try:
+            logger.info(f"Getting jobs calculating for table {table_fqn}.")
+            job_sources_info = self._get_job_sources(
+                self._client_options._use_lineage_processes, table_fqn
+            )
+        except Exception as e:
+            logger.error(f"Error getting job sources info for table {table_fqn}: {e}")
+            job_sources_info = None
         prompt_manager = PromptManager(
             PromtType.PROMPT_TYPE_TABLE, self._client_options
         )
@@ -547,12 +555,20 @@ class Client:
             table_profile = self._get_table_profile(
                 self._client_options._use_profile, table_fqn
             )
-            table_sources_info = self._get_table_sources_info(
-                self._client_options._use_lineage_tables, table_fqn
-            )
-            job_sources_info = self._get_job_sources(
-                self._client_options._use_lineage_processes, table_fqn
-            )
+            try:
+                table_sources_info = self._get_table_sources_info(
+                    self._client_options._use_lineage_tables, table_fqn
+                )
+            except Exception as e:
+                logger.error(f"Error getting table sources info for table {table_fqn}: {e}")
+                table_sources_info = None
+            try:
+                job_sources_info = self._get_job_sources(
+                    self._client_options._use_lineage_processes, table_fqn
+                )
+            except Exception as e:
+                logger.error(f"Error getting job sources info for table {table_fqn}: {e}")
+                job_sources_info = None
 
             if documentation_uri == "":
                 documentation_uri = None
