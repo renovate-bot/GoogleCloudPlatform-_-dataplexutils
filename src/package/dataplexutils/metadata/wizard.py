@@ -299,20 +299,20 @@ class Client:
                 if documentation_csv_uri == None:
                     raise ValueError("A documentation URI is required for the DOCUMENTED strategy.")
 
-            if self._regenerate:
+            if self._client_options._regenerate:
                 tables = self._list_tables_in_dataset_for_regeneration(dataset_fqn)
             else:
                 tables = self._list_tables_in_dataset(dataset_fqn)
             
             if int_strategy == constants["GENERATION_STRATEGY"]["DOCUMENTED"]:
                 tables_from_uri = self._get_tables_from_uri(documentation_csv_uri)
-                if not self._regenerate:
+                if not self._client_options._regenerate:
                     for table in tables_from_uri:
                         if table[0] not in tables:
                             raise ValueError(f"Table {table} not found in dataset {dataset_fqn}.")
 
                         self.generate_table_description(table[0], table[1])
-                if self._regenerate:
+                if self._client_options._regenerate:
                     tables_from_uri_first_elements = [table[0] for table in tables_from_uri]
                     for table in tables:
                         if self._check_if_table_should_be_regenerated(table):
@@ -322,13 +322,13 @@ class Client:
 
             if int_strategy == constants["GENERATION_STRATEGY"]["DOCUMENTED_THEN_REST"]:
                 tables_from_uri = self._get_tables_from_uri(documentation_csv_uri)
-                if not self._regenerate:
+                if not self._client_options._regenerate:
                     for table in tables_from_uri:
                         if table not in tables:
                             raise ValueError(f"Table {table} not found in dataset {dataset_fqn}.")
                         self.generate_table_description(table[0], table[1])
                 tables_from_uri_first_elements = [table[0] for table in tables_from_uri]
-                if self._regenerate:
+                if self._client_options._regenerate:
                     tables_from_uri_first_elements = [table[0] for table in tables_from_uri]
                     for table in tables:
                         if self._check_if_table_should_be_regenerated(table):
