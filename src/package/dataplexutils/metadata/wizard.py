@@ -394,10 +394,10 @@ class Client:
                 for table in tables_from_uri:
                     if table[0] not in tables:
                         raise ValueError(f"Table {table[0]} not found in dataset {dataset_fqn}.")
-                    if self._regenerate and self._check_if_table_should_be_regenerated(table[0]):
+                    if self._client_options._regenerate and self._check_if_table_should_be_regenerated(table[0]):
                         self.generate_table_description(table[0], table[1])
                     
-                    if not self._regenerate:
+                    if not self._client_options._regenerate:
                         self.generate_table_description(table[0], table[1])
 
                     #call column generation because checking for column to-be-regenerated is done per column
@@ -408,19 +408,19 @@ class Client:
                 for table in tables_from_uri:
                     if table not in tables:
                         raise ValueError(f"Table {table[0]} not found in dataset {dataset_fqn}.")
-                    if self._regenerate and self._check_if_table_should_be_regenerated(table[0]):
+                    if self._client_options._regenerate and self._check_if_table_should_be_regenerated(table[0]):
                         self.generate_table_description(table[0], table[1])
                     
-                    if not self._regenerate:
+                    if not self._client_options._regenerate:
                         self.generate_table_description(table[0], table[1])
 
                 tables_from_uri_first_elements = [table[0] for table in tables_from_uri]
                 for table in tables:
                     if table not in tables_from_uri_first_elements:
-                        if self._regenerate and self._check_if_table_should_be_regenerated(table[0]):
+                        if self._client_options._regenerate and self._check_if_table_should_be_regenerated(table[0]):
                             self.generate_table_description(table[0], table[1])
                 
-                        if not self._regenerate:
+                        if not self._client_options._regenerate:
                             self.generate_table_description(table[0], table[1])
                         
                         self.generate_columns_descriptions(table[0],table[1])
@@ -1570,8 +1570,8 @@ class Client:
         Raises:
             Add stringdocs
         """
-        self._use_human_comments=True
-        self._regenerate=True
+        self._client_options._use_human_comments=True
+        self._client_options._regenerate=True
         try:
             output=self.generate_table_description(self,table_fqn)
             self._update_table_metadata_as_regenerated(table_fqn)
@@ -1588,8 +1588,8 @@ class Client:
         Raises:
             Exception
         """
-        self._use_human_comments=True
-        self._regenerate=True
+        self._client_options._use_human_comments=True
+        self._client_options._regenerate=True
         try:
             output= self.generate_columns_descriptions(table_fqn,documentation_uri,human_comments)
             
