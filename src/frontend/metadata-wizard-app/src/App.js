@@ -32,6 +32,7 @@ function App() {
       use_ext_documents: false,
       persist_to_dataplex_catalog: true,
       stage_for_review: false,
+      top_values_in_description: true,
     },
     client_settings: {
       project_id: '',
@@ -127,6 +128,7 @@ function App() {
           use_ext_documents: params.client_options_settings.use_ext_documents,
           persist_to_dataplex_catalog: persistToDataplex,
           stage_for_review: stageForReview,
+          top_values_in_description: params.client_options_settings.top_values_in_description,
         },
         client_settings: {
           project_id: params.client_settings.project_id,
@@ -391,6 +393,14 @@ function App() {
             disabled={true}
           />}
           label="Stage generations in Dataplex for Review"
+        />
+        <FormControlLabel
+          control={<Checkbox
+            name="client_options_settings.top_values_in_description"
+            checked={params.client_options_settings.top_values_in_description}
+            onChange={handleChange}
+          />}
+          label="Store top 10 values in column descriptions"
         />
       </Box>
 
