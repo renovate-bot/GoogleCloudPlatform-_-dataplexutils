@@ -30,7 +30,7 @@ CANDIDATE_COUNT = 1
 MAX_OUTPUT_TOKENS = 2048
 
 [OUTPUT_CLAUSES]
-AI_WARNING = "===AI generated description===\n"
+AI_WARNING = "===AI generated description==="
 
 [PROMPTS]
 SYSTEM_PROMPT = """

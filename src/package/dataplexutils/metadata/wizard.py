@@ -826,14 +826,21 @@ class Client:
 
     def _get_updated_column(self, column, column_description):
         try:
+            if self._client_options._add_ai_warning==True and column.description is not None:
+                try:
+                    index = column.description.index(constants['OUTPUT_CLAUSES']['AI_WARNING'])
+                    column_description = column.description[:index] + column_description
+                except ValueError:
+                    column_description = column.description + column_description
+            
             return bigquery.SchemaField(
                 name=column.name,
                 field_type=column.field_type,
                 mode=column.mode,
                 default_value_expression=column.default_value_expression,
                 description=column_description[
-                    0 : constants["DATA"]["MAX_COLUMN_DESC_LENGTH"]
-                ],
+                        0 : constants["DATA"]["MAX_COLUMN_DESC_LENGTH"]
+                    ],
                 fields=column.fields,
                 policy_tags=column.policy_tags,
                 precision=column.precision,
@@ -1382,7 +1389,18 @@ class Client:
             table = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(
                 table_fqn
             )
-            table.description = description
+                # Start Generation Here
+            if self._client_options._add_ai_warning==True and table.description is not None:
+                ai_warning = constants['OUTPUT_CLAUSES']['AI_WARNING']
+                if ai_warning in table.description:
+                    index = table.description.index(ai_warning)
+                    table.description = table.description[:index] + description
+                else:
+                    table.description += f"\n{description}"
+            else:
+                table.description = f"{description}"
+            #table.description = description
+            logger.info(f"Updating table {table_fqn} with description: {description}")
             _ = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].update_table(
                 table, ["description"]
             )
