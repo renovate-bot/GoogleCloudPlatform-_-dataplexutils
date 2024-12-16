@@ -151,10 +151,16 @@ class PromptManager:
             # System
             column_description_prompt = constants["PROMPTS"]["SYSTEM_PROMPT"]
             # Base
-            column_description_prompt = (
-                column_description_prompt
-                + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_BASE"]
-            )
+            if self._client_options._columns_contain_examples==True:
+                column_description_prompt = (
+                    column_description_prompt
+                    + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_BASE_WITH_EXAMPLES"]
+                )
+            else:
+                column_description_prompt = (
+                    column_description_prompt
+                    + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_BASE"]
+                )
             # Additional metadata information
             if self._client_options._use_profile:
                 column_description_prompt = (
@@ -205,7 +211,8 @@ class ClientOptions:
         stage_for_review=False,
         add_ai_warning=True,
         use_human_comments=False,
-        regenerate=False
+        regenerate=False,
+        columns_contain_examples=True
     ):
         self._use_lineage_tables = use_lineage_tables
         self._use_lineage_processes = use_lineage_processes
@@ -217,6 +224,7 @@ class ClientOptions:
         self._add_ai_warning = add_ai_warning
         self._use_human_comments = use_human_comments
         self._regenerate = regenerate
+        self._columns_contain_examples = columns_contain_examples
 
 class Client:
     """Represents the main metadata wizard client."""
