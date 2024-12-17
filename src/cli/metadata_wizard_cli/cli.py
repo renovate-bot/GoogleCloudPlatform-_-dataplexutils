@@ -49,7 +49,8 @@ def _call_api(
     table_id,
     debug,
     documentation_csv_uri,
-    strategy
+    strategy,
+    top_values_in_description,
 ):
     API_URL = f"https://{service}"
     API_URL_DEBUG = "http://localhost:8000"
@@ -80,7 +81,8 @@ def _call_api(
             "use_data_quality": use_data_quality,
             "use_ext_documents": use_ext_documents,
             "persist_to_dataplex_catalog": persist_to_dataplex_catalog,
-            "stage_for_review": stage_for_review
+            "stage_for_review": stage_for_review,
+            "top_values_in_description": top_values_in_description
         },
         "client_settings": {
             "project_id": dataplex_project_id,
@@ -241,6 +243,14 @@ def _get_input_arguments():
         type=bool,
         default=False
         )
+    parser.add_argument(
+        "--top_values_in_description",
+        dest="top_values_in_description",
+        required=False,
+        type=bool,
+        default=True,
+        help="Include top 10 values in column descriptions"
+    )
         
     return parser.parse_args()
 
@@ -266,6 +276,7 @@ def main():
     debug = args.debug
     strategy = args.strategy
     documentation_csv_uri = args.documentation_csv_uri
+    top_values_in_description = args.top_values_in_description
     _call_api(
         service,
         scope,
@@ -286,6 +297,7 @@ def main():
         debug,
         documentation_csv_uri,
         strategy,
+        top_values_in_description,
     )
 
 if __name__ == "__main__":

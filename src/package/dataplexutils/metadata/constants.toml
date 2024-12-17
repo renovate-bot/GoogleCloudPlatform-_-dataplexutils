@@ -30,7 +30,7 @@ CANDIDATE_COUNT = 1
 MAX_OUTPUT_TOKENS = 2048
 
 [OUTPUT_CLAUSES]
-AI_WARNING = "===AI generated description===\n"
+AI_WARNING = "===AI generated description==="
 
 [PROMPTS]
 SYSTEM_PROMPT = """
@@ -83,7 +83,8 @@ Take into consideration the comments provided by the user about this table. They
 OUTPUT_FORMAT_PROMPT = """
 Do not use markdown, or do not the keywords like SQL at the beginning of answer, do not use quotes to enclose the response.
 """
-COLUMN_DESCRIPTION_PROMPT_BASE = """
+
+COLUMN_DESCRIPTION_PROMPT_BASE_WITH_EXAMPLES = """
 You need to produce metadata description in a form of description for a column of a table.
 Input data:
 The column that is described  is {column_name}
@@ -133,6 +134,51 @@ Categorical
 Is this column a primary key
 No
 """
+
+
+COLUMN_DESCRIPTION_PROMPT_BASE = """
+You need to produce metadata description in a form of description for a column of a table.
+Input data:
+The column that is described  is {column_name}
+The table fully qualified name is  {table_fqn}
+The table full schema is {table_schema_str}
+
+Please answer in the following format:
+Description of the column
+Type of column
+Categorical column or measure
+Is this column a primary key
+SQL formula to calculate the column
+
+Describe only this column content. When proving most frequent values, provide 10 most frequent values based on the profile information.
+You MUST Use quotes to enclose the values.
+Take into consideration the comments provided by the user. They are more important than other information: {human_comments}
+
+Examples of values:
+###
+This column represents the date partition of the accident records.  It is likely used for partitioning the table to improve query performance and reduce storage costs.
+
+Type of column
+DATE
+
+Categorical column or measure
+Categorical
+
+Is this column a primary key
+No
+###
+This column indicates the type of driver impairment, if any, involved in a car crash.  The values represent various conditions affecting the driver's ability to operate a vehicle safely, ranging from no impairment to various forms of impairment such as alcohol or drug influence, fatigue, illness, or other physical or emotional conditions.  The data is sourced from the Fatality Analysis Reporting System (FARS).
+
+Type of column
+STRING
+
+Categorical column or measure
+Categorical
+
+Is this column a primary key
+No
+"""
+
 COLUMN_DESCRIPTION_PROMPT_HUMAN_COMMENTS = """
 Take into consideration the comments provided by the user about this column. They are more important than other information: {human_comments}
 """

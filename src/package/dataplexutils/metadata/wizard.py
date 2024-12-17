@@ -151,10 +151,17 @@ class PromptManager:
             # System
             column_description_prompt = constants["PROMPTS"]["SYSTEM_PROMPT"]
             # Base
-            column_description_prompt = (
-                column_description_prompt
-                + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_BASE"]
-            )
+            if self._client_options._top_values_in_description==True:
+                column_description_prompt = (
+                    column_description_prompt
+                    + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_BASE_WITH_EXAMPLES"]
+                )
+            else:
+                column_description_prompt = (
+                    column_description_prompt
+                    + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_BASE"]
+                )
+                
             # Additional metadata information
             if self._client_options._use_profile:
                 column_description_prompt = (
@@ -205,7 +212,8 @@ class ClientOptions:
         stage_for_review=False,
         add_ai_warning=True,
         use_human_comments=False,
-        regenerate=False
+        regenerate=False,
+        top_values_in_description=True
     ):
         self._use_lineage_tables = use_lineage_tables
         self._use_lineage_processes = use_lineage_processes
@@ -217,6 +225,7 @@ class ClientOptions:
         self._add_ai_warning = add_ai_warning
         self._use_human_comments = use_human_comments
         self._regenerate = regenerate
+        self._top_values_in_description = top_values_in_description
 
 class Client:
     """Represents the main metadata wizard client."""
@@ -826,14 +835,21 @@ class Client:
 
     def _get_updated_column(self, column, column_description):
         try:
+            if self._client_options._add_ai_warning==True and column.description is not None:
+                try:
+                    index = column.description.index(constants['OUTPUT_CLAUSES']['AI_WARNING'])
+                    column_description = column.description[:index] + column_description
+                except ValueError:
+                    column_description = column.description + column_description
+            
             return bigquery.SchemaField(
                 name=column.name,
                 field_type=column.field_type,
                 mode=column.mode,
                 default_value_expression=column.default_value_expression,
                 description=column_description[
-                    0 : constants["DATA"]["MAX_COLUMN_DESC_LENGTH"]
-                ],
+                        0 : constants["DATA"]["MAX_COLUMN_DESC_LENGTH"]
+                    ],
                 fields=column.fields,
                 policy_tags=column.policy_tags,
                 precision=column.precision,
@@ -1382,7 +1398,18 @@ class Client:
             table = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(
                 table_fqn
             )
-            table.description = description
+                # Start Generation Here
+            if self._client_options._add_ai_warning==True and table.description is not None:
+                ai_warning = constants['OUTPUT_CLAUSES']['AI_WARNING']
+                if ai_warning in table.description:
+                    index = table.description.index(ai_warning)
+                    table.description = table.description[:index] + description
+                else:
+                    table.description += f"\n{description}"
+            else:
+                table.description = f"{description}"
+            #table.description = description
+            logger.info(f"Updating table {table_fqn} with description: {description}")
             _ = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].update_table(
                 table, ["description"]
             )
@@ -1654,16 +1681,55 @@ class Client:
             Add stringdocs
         """
         # Create a client
+        project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
+
         client = self._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
         client = dataplex_v1.CatalogServiceClient()
 
+        entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+        aspect_type = f"""projects/dataplex-types/locations/global/aspectTypes/overview"""
+        aspect_types = [aspect_type]
+        old_overview=None
+        aspect_content=None
+
+        try:
+            request=dataplex_v1.GetEntryRequest(name=entry_name,view=dataplex_v1.EntryView.CUSTOM,aspect_types=aspect_types)
+            current_entry = client.get_entry(request=request)
+            for i in current_entry.aspects:
+                if i.endswith(f"""global.overview""") and current_entry.aspects[i].path=="":
+                        # Start of Selection
+                        from google.protobuf.json_format import MessageToDict,ParseDict
+                        logger.info(f"Reading existing aspect {i} of table {table_fqn}")
+                        old_overview = dict(current_entry.aspects[i].data)
+                        logger.info(f"""old_overview: {old_overview["content"]}""")
+
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+        
+        
+
         # Create the aspect
         aspect = dataplex_v1.Aspect()
-        aspect.aspect_type = f"""projects/dataplex-types/locations/global/aspectTypes/overview"""
+        aspect.aspect_type = aspect_type
+        aspect_content={}
         #aspect.aspect_type = f"{project_id}/global/{aspect_type_id}"
-        aspect_content = {"content": description }
+        if old_overview is not None and self._client_options._add_ai_warning==True:
+            logging.info(f"""if condidion for old_overview met""")
+            #aspect_content = old_overview
+            logging.info(f"""aspect_content: {aspect_content}""")
+            try:
+                # Start of Selection
+                index = old_overview["content"].index(constants["OUTPUT_CLAUSES"]["AI_WARNING"])
+                aspect_content["content"] = old_overview["content"][:index] + description
+            except Exception as e:
+                logging.error(f"""Exception: {e}""")
+                aspect_content["content"] = f"""{old_overview["content"]}\n{description}"""
+        else:
+            aspect_content = {"content": description }
 
 
+        logging.info(f"""aspect_content: {aspect_content}""")   
         # Convert aspect_content to a Struct
         data_struct = struct_pb2.Struct()
         data_struct.update(aspect_content)
@@ -1671,11 +1737,13 @@ class Client:
 
         overview_path = f"dataplex-types.global.overview"
 
-        project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
+
         print(f"project_id: {project_id}, dataset_id: {dataset_id}, table_id: {table_id}")
         entry = dataplex_v1.Entry()
-        entry.name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+        entry.name = entry_name
         entry.aspects[overview_path]= aspect
+
+
 
         # Initialize request argument(s)
         request = dataplex_v1.UpdateEntryRequest(
