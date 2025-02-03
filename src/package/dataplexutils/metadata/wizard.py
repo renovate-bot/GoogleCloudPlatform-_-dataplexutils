@@ -213,7 +213,9 @@ class ClientOptions:
         add_ai_warning=True,
         use_human_comments=False,
         regenerate=False,
-        top_values_in_description=True
+        top_values_in_description=True,
+        description_handling=constants["DESCRIPTION_HANDLING"]["APPEND"],
+        description_prefix=constants["OUTPUT_CLAUSES"]["AI_WARNING"]
     ):
         self._use_lineage_tables = use_lineage_tables
         self._use_lineage_processes = use_lineage_processes
@@ -226,6 +228,8 @@ class ClientOptions:
         self._use_human_comments = use_human_comments
         self._regenerate = regenerate
         self._top_values_in_description = top_values_in_description
+        self._description_handling = description_handling
+        self._description_prefix = description_prefix
 
 class Client:
     """Represents the main metadata wizard client."""
@@ -370,6 +374,7 @@ class Client:
         Raises:
             NotFound: If the specified table does not exist.
         """
+        
         logger.info(f"Generating metadata for dataset {dataset_fqn}.")
         #for table in list:
        #     self.generate_table_description(f"{dataset_fqn}.{table}")
@@ -530,7 +535,9 @@ class Client:
                 logger.info(f"Table description updated for table {table_fqn} in Dataplex catalog")
         else:
             if not self._check_if_exists_aspect_type(constants["ASPECT_TEMPLATE"]["name"]):
+                logger.info(f"Aspect type {constants['ASPECT_TEMPLATE']['name']} not exists. Attempting to create it")
                 self._create_aspect_type(constants["ASPECT_TEMPLATE"]["name"])
+                logger.info(f"Aspect type {constants['ASPECT_TEMPLATE']['name']} created")
             self._update_table_draft_description(table_fqn, table_description,)
             logger.info(f"Table {table_fqn} will not be updated in BigQuery.")
             None
@@ -594,12 +601,16 @@ class Client:
             # descriptions and then swap it
             updated_schema = []
             updated_columns = []
+
+            # Iterate over the columns in the table schema
             for column in table_schema:
+                # Extract column information from the table profile
                 column_info = self._extract_column_info_from_table_profile(table_profile, column.name)
 
                 if self._client_options._use_human_comments:
                     human_comments = self._get_column_comment(table_fqn,column.name)
                 
+                # Format the prompt with the column information
                 column_description_prompt_expanded = column_description_prompt.format(
                     column_name=column.name,
                     table_fqn=table_fqn,
@@ -611,6 +622,8 @@ class Client:
                     job_sources_info=job_sources_info,
                     human_comments=human_comments
                 )
+
+
                 if self._client_options._regenerate == True and self._check_if_column_should_be_regenerated(table_fqn,column.name) or self._client_options._regenerate == False:
                     #logger.info(f"Prompt used is: {column_description_prompt_expanded}.")
                     column_description = self._llm_inference(
@@ -623,13 +636,17 @@ class Client:
                     updated_schema.append(
                         self._get_updated_column(column, column_description)
                     )
+                    if self._client_options._stage_for_review:
+                        self._update_column_draft_description(table_fqn,column.name,column_description)
                     updated_columns.append(column)
                     logger.info(f"Generated column description: {column_description}.")
                     
                 else:
                     updated_schema.append(column)
                     logger.info(f"Column {column.name} will not be updated.")
-            self._update_table_schema(table_fqn, updated_schema)
+            if not self._client_options._stage_for_review:
+                self._update_table_schema(table_fqn, updated_schema)
+            
             if self._client_options._regenerate:
                 for column in updated_columns:
                     logger.info(f"Updating table {table_fqn} column {column.name} as regenerated")
@@ -1384,39 +1401,25 @@ class Client:
             raise e
 
     def _update_table_bq_description(self, table_fqn, description):
-        """Updates the description of a BigQuery table.
-
-        Args:
-            table_fqn (str): The fully qualified name of the table
-                (e.g., 'project.dataset.table')
-            description (str): The new description to set
-
-        Raises:
-            Exception: If there is an error updating the description
-        """
+        """Updates the table description in BigQuery."""
         try:
-            table = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].get_table(
-                table_fqn
-            )
-                # Start Generation Here
-            if self._client_options._add_ai_warning==True and table.description is not None:
-                ai_warning = constants['OUTPUT_CLAUSES']['AI_WARNING']
-                if ai_warning in table.description:
-                    index = table.description.index(ai_warning)
-                    table.description = table.description[:index] + description
-                else:
-                    table.description += f"\n{description}"
-            else:
-                table.description = f"{description}"
-            #table.description = description
-            logger.info(f"Updating table {table_fqn} with description: {description}")
-            _ = self._cloud_clients[constants["CLIENTS"]["BIGQUERY"]].update_table(
-                table, ["description"]
-            )
+            project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
+            client = bigquery.Client(project=project_id)
+            table = client.get_table(f"{project_id}.{dataset_id}.{table_id}")
+            
+            # Get existing description and format the new one
+            existing_description = table.description or ""             
+            combined_description = self._combine_description(existing_description, description, self._client_options._description_handling)
+            
+            table.description = combined_description
+            client.update_table(table, ["description"])
+            
+            logger.info(f"Updated description for table {table_fqn}")
+            return True
         except Exception as e:
-            logger.error(f"Exception: {e}.")
+            logger.error(f"Exception updating table description: {e}.")
             raise e
-        
+
     def accept_table_draft_description(self, table_fqn):
         """Method to accept the table draft description
 
@@ -1557,36 +1560,29 @@ class Client:
         self._update_column_bq_description(table_fqn, column_name, overview)
     
     def _update_column_bq_description(self, table_fqn, column_name, description):
-        """Updates the description of a BigQuery column.
-        Args:
-            table_fqn (str): The fully qualified name of the table (e.g., 'project.dataset.table')
-            column_name (str): The name of the column to update
-            description (str): The new description to set
-
-        Raises:
-            Exception: If there is an error updating the column description
-        """
+        """Updates the column description in BigQuery."""
         try:
-            logger.info(f"Updating description for column {column_name} in table {table_fqn}.")
-
-            self._table_exists(table_fqn)
-            table_schema_str, table_schema = self._get_table_schema(table_fqn)
-
-            updated_schema = []
-            for column in table_schema:
-                if column.name == column_name:
-                    updated_schema.append(
-                        self._get_updated_column(column, description)
-                    )
-                else:    
-                    updated_schema.append(column)            
-            self._update_table_schema(table_fqn, updated_schema)
-            logger.info(f"Updated column description: {description}.")
+            project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
+            client = bigquery.Client(project=project_id)
+            table = client.get_table(f"{project_id}.{dataset_id}.{table_id}")
+            
+            schema = list(table.schema)
+            for field in schema:
+                if field.name == column_name:
+                    # Get existing description and format the new one
+                    existing_description = field.description or ""
+                    combined_description = self._combine_description(existing_description, description, self._client_options._description_handling)
+                    field.description = combined_description
+                    break
+            
+            table.schema = schema
+            client.update_table(table, ["schema"])
+            
+            logger.info(f"Updated description for column {column_name} in table {table_fqn}")
+            return True
         except Exception as e:
-            logger.error(f"Update of column description table {table_fqn} column {column_name} failed.")
-            raise e(
-                message=f"Update of column description table {table_fqn} column {column_name} failed."
-            )
+            logger.error(f"Exception updating column description: {e}.")
+            raise e
 
     def regenerate_table_description(self, table_fqn, documentation_uri=None):
         """Add Moves description from draft aspect to dataplex Overview and BQ
@@ -1625,7 +1621,7 @@ class Client:
             logger.error(f"Exception: {e}.")
             raise e
     
-    def get_comment_to_table_draft_description(self, table_fqn):
+    def get_comments_to_table_draft_description(self, table_fqn):
         """Add Moves description from draft aspect to dataplex Overview and BQ
 
         Args:
@@ -1714,19 +1710,12 @@ class Client:
         aspect.aspect_type = aspect_type
         aspect_content={}
         #aspect.aspect_type = f"{project_id}/global/{aspect_type_id}"
-        if old_overview is not None and self._client_options._add_ai_warning==True:
-            logging.info(f"""if condidion for old_overview met""")
-            #aspect_content = old_overview
-            logging.info(f"""aspect_content: {aspect_content}""")
-            try:
-                # Start of Selection
-                index = old_overview["content"].index(constants["OUTPUT_CLAUSES"]["AI_WARNING"])
-                aspect_content["content"] = old_overview["content"][:index] + description
-            except Exception as e:
-                logging.error(f"""Exception: {e}""")
-                aspect_content["content"] = f"""{old_overview["content"]}\n{description}"""
+        if old_overview is not None:
+            old_description = old_overview["content"]
+            combined_description = self._combine_description(old_description, description, self._client_options._description_handling)
+            aspect_content["content"] = combined_description
         else:
-            aspect_content = {"content": description }
+            aspect_content = {"content": description}
 
 
         logging.info(f"""aspect_content: {aspect_content}""")   
@@ -1910,13 +1899,15 @@ class Client:
 
 
     def _update_table_draft_description(self, table_fqn, description):
-        """Add stringdocs
+        """Updates the draft description for a table in Dataplex.
 
         Args:
-            Add stringdocs
+            table_fqn (str): The fully qualified name of the table
+                (e.g., 'project.dataset.table')
+            description (str): The new draft description for the table
 
         Raises:
-            Add stringdocs
+            Exception: If there is an error updating the draft description
         """
         # Create a client
         client = self._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
@@ -2162,27 +2153,119 @@ class Client:
 
         return True
 
-    def _promote_table_description_from_draft(self, table_fqn, description):
-        """Add stringdocs
+    def _promote_table_description_from_draft(self, table_fqn):
+        """Promotes the draft description to the actual table description.
+        This method copies the description from the draft aspect in Dataplex to:
+        1. The BigQuery table description
+        2. The Dataplex overview aspect (if persist_to_dataplex_catalog is enabled)
 
         Args:
-            Add stringdocs
+            table_fqn (str): The fully qualified name of the table
+                (e.g., 'project.dataset.table')
 
         Raises:
-            Add stringdocs
+            Exception: If there is an error promoting the description
         """
-        None
+        try:
+            # Create a client
+            client = self._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+
+            # Get project and dataset IDs
+            project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
+
+            # Set up aspect type and entry name
+            aspect_type = f"""projects/{self._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""
+            aspect_types = [aspect_type]
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+
+            # Get the entry with the draft aspect
+            request = dataplex_v1.GetEntryRequest(
+                name=entry_name,
+                view=dataplex_v1.EntryView.CUSTOM,
+                aspect_types=aspect_types
+            )
+            entry = client.get_entry(request=request)
+
+            # Find the draft description in the custom aspect
+            draft_description = None
+            for aspect_key, aspect in entry.aspects.items():
+                if aspect_key.endswith(f"""global.{constants["ASPECT_TEMPLATE"]["name"]}""") and aspect.path == "":
+                    draft_description = aspect.data["contents"]
+                    break
+
+            if draft_description is None:
+                logger.error(f"No draft description found for table {table_fqn}")
+                raise ValueError(f"No draft description found for table {table_fqn}")
+
+            # Update BigQuery table description
+            self._update_table_bq_description(table_fqn, draft_description)
+
+            # Update Dataplex overview if enabled
+            if self._client_options._persist_to_dataplex_catalog:
+                self._update_table_dataplex_description(table_fqn, draft_description)
+                logger.info(f"Updated Dataplex overview for table {table_fqn}")
+
+            logger.info(f"Successfully promoted draft description for table {table_fqn}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to promote draft description for table {table_fqn}: {e}")
+            raise e
     
-    def _promote_column_description_from_draft(self, table_fqn, description):
-        """Add stringdocs
+    def _promote_column_description_from_draft(self, table_fqn, column_name):
+        """Promotes the draft description to the actual column description.
+        This method copies the description from the draft aspect in Dataplex to
+        the BigQuery column description.
 
         Args:
-            Add stringdocs
+            table_fqn (str): The fully qualified name of the table
+                (e.g., 'project.dataset.table')
+            column_name (str): The name of the column to update
 
         Raises:
-            Add stringdocs
+            Exception: If there is an error promoting the description
+            ValueError: If no draft description is found for the column
         """
-        None
+        try:
+            # Create a client
+            client = self._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+
+            # Get project and dataset IDs
+            project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
+
+            # Set up aspect type and entry name
+            aspect_type = f"""projects/{self._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""
+            aspect_types = [aspect_type]
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+
+            # Get the entry with the draft aspect
+            request = dataplex_v1.GetEntryRequest(
+                name=entry_name,
+                view=dataplex_v1.EntryView.CUSTOM,
+                aspect_types=aspect_types
+            )
+            entry = client.get_entry(request=request)
+
+            # Find the draft description in the custom aspect for the specific column
+            draft_description = None
+            for aspect_key, aspect in entry.aspects.items():
+                if aspect_key.endswith(f"""global.{constants["ASPECT_TEMPLATE"]["name"]}@Schema.{column_name}""") and aspect.path == f"Schema.{column_name}":
+                    draft_description = aspect.data["contents"]
+                    break
+
+            if draft_description is None:
+                logger.error(f"No draft description found for column {column_name} in table {table_fqn}")
+                raise ValueError(f"No draft description found for column {column_name} in table {table_fqn}")
+
+            # Update BigQuery column description
+            self._update_column_bq_description(table_fqn, column_name, draft_description)
+
+            logger.info(f"Successfully promoted draft description for column {column_name} in table {table_fqn}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to promote draft description for column {column_name} in table {table_fqn}: {e}")
+            raise e
     
     def _add_comment_to_column_draft_description(self, table_fqn, description):
         """Add stringdocs
@@ -2290,3 +2373,25 @@ class Client:
             return True
         except google.api_core.exceptions.NotFound:
             return False
+
+    def _combine_description(self, old_description, new_description, description_handling):
+        if not new_description:
+            return old_description
+
+        if description_handling == constants["DESCRIPTION_HANDLING"]["APPEND"]:
+            if old_description:
+                try:
+                    # Try to find the AI warning prefix in old description
+                    index = old_description.index(constants['OUTPUT_CLAUSES']['AI_WARNING'])
+                    # If found, replace everything after the prefix
+                    return old_description[:index] + new_description
+                except ValueError:
+                    # If no prefix found, append normally
+                    return old_description + new_description
+            return new_description
+        elif description_handling == constants["DESCRIPTION_HANDLING"]["PREPEND"]:
+            return new_description + old_description
+        elif description_handling == constants["DESCRIPTION_HANDLING"]["REPLACE"]:
+            return new_description
+        else:
+            return old_description

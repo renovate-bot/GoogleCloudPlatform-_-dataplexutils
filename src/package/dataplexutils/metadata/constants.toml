@@ -282,3 +282,23 @@ description = "URI of the external document"
 display_name = "External Document URI"
 string_type = "url"
 
+[[record_fields]]
+type_ = "bool"
+name = "is-accepted"
+index = 10
+[record_fields.annotations]
+description = "Indicates if the description is accepted and was promoted to the BQ description or Dataplex overview"
+display_name = "Draft has been accepted"
+
+[[record_fields]]
+type_ = "datetime"
+name = "when-accepted"
+index = 11
+[record_fields.annotations]
+description = "Date and time when the description was accepted"
+display_name = "When was draft accepted"
+
+[DESCRIPTION_HANDLING]
+APPEND = "append"
+PREPEND = "prepend"
+REPLACE = "replace"

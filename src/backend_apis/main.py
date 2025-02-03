@@ -35,7 +35,9 @@ class ClientOptionsSettings(BaseModel):
     use_ext_documents: bool
     persist_to_dataplex_catalog: bool
     stage_for_review: bool
-    top_values_in_description: bool 
+    top_values_in_description: bool
+    description_handling: str
+    description_prefix: str
 
 
 class ClientSettings(BaseModel):
@@ -55,6 +57,9 @@ class DatasetSettings(BaseModel):
     dataset_id: str
     documentation_csv_uri: str
     strategy: str
+
+class ColumnSettings(BaseModel):
+    column_name: str
 
 
 app.add_middleware(
@@ -101,7 +106,10 @@ def generate_table_description(
             use_data_quality=client_options_settings.use_data_quality,
             use_ext_documents=client_options_settings.use_ext_documents,
             persist_to_dataplex_catalog=client_options_settings.persist_to_dataplex_catalog,
-            stage_for_review=client_options_settings.stage_for_review
+            stage_for_review=client_options_settings.stage_for_review,
+            top_values_in_description=client_options_settings.top_values_in_description,
+            description_handling=client_options_settings.description_handling,
+            description_prefix=client_options_settings.description_prefix
         )
         client = Client(
             project_id=client_settings.project_id,
@@ -123,7 +131,6 @@ def generate_table_description(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
-
 @app.post("/generate_columns_descriptions")
 def generate_columns_descriptions(
     client_options_settings: ClientOptionsSettings = Body(),
@@ -140,7 +147,9 @@ def generate_columns_descriptions(
             use_ext_documents=client_options_settings.use_ext_documents,
             persist_to_dataplex_catalog=client_options_settings.persist_to_dataplex_catalog,
             stage_for_review=client_options_settings.stage_for_review,
-            top_values_in_description=client_options_settings.top_values_in_description
+            top_values_in_description=client_options_settings.top_values_in_description,
+            description_handling=client_options_settings.description_handling,
+            description_prefix=client_options_settings.description_prefix
         )
         client = Client(
             project_id=client_settings.project_id,
@@ -187,7 +196,10 @@ def generate_dataset_tables_descriptions(
             client_options_settings.use_data_quality,
             client_options_settings.use_ext_documents,
             client_options_settings.persist_to_dataplex_catalog,
-            client_options_settings.stage_for_review
+            client_options_settings.stage_for_review,
+            client_options_settings.top_values_in_description,
+            client_options_settings.description_handling,
+            client_options_settings.description_prefix
         )
         client = Client(
             project_id=client_settings.project_id,
@@ -237,7 +249,10 @@ def generate_dataset_tables_columns_descriptions(
             client_options_settings.use_data_quality,
             client_options_settings.use_ext_documents,
             client_options_settings.persist_to_dataplex_catalog,
-            client_options_settings.stage_for_review
+            client_options_settings.stage_for_review,
+            client_options_settings.top_values_in_description,
+            client_options_settings.description_handling,
+            client_options_settings.description_prefix
         )
         client = Client(
             project_id=client_settings.project_id,
@@ -257,6 +272,101 @@ def generate_dataset_tables_columns_descriptions(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
+@app.post("/accept_table_draft_description")
+def accept_table_draft_description(
+    client_options_settings: ClientOptionsSettings = Body(),
+    client_settings: ClientSettings = Body(),
+    table_settings: TableSettings = Body(),
+    dataset_settings: DatasetSettings = Body(),
+):
+    """
+    Accepts the draft description for a table, promoting it to the actual table description.
+
+    Args:
+        client_options_settings: Configuration for the Dataplex client options.
+        client_settings: Project and location details.
+        table_settings: Table identifier information.
+
+    Returns:
+        A message indicating success or failure.
+    """
+    try:
+        client_options = ClientOptions(
+            use_lineage_tables=client_options_settings.use_lineage_tables,
+            use_lineage_processes=client_options_settings.use_lineage_processes,
+            use_profile=client_options_settings.use_profile,
+            use_data_quality=client_options_settings.use_data_quality,
+            use_ext_documents=client_options_settings.use_ext_documents,
+            persist_to_dataplex_catalog=client_options_settings.persist_to_dataplex_catalog,
+            stage_for_review=client_options_settings.stage_for_review,
+            description_handling=client_options_settings.description_handling,
+            description_prefix=client_options_settings.description_prefix
+        )
+        client = Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+            client_options=client_options
+        )
+
+        table_fqn = f"{table_settings.project_id}.{table_settings.dataset_id}.{table_settings.table_id}"
+        logger.info(f"Accepting draft description for table: {table_fqn}")
+        client.accept_table_draft_description(table_fqn)
+        return {"message": "Table draft description accepted successfully"}
+    except Exception as e:
+        logger.exception("An error occurred while accepting table draft description") 
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+@app.post("/accept_column_draft_description")
+def accept_column_draft_description(
+    client_options_settings: ClientOptionsSettings = Body(),
+    client_settings: ClientSettings = Body(),
+    table_settings: TableSettings = Body(),
+    dataset_settings: DatasetSettings = Body(),
+    column_settings: ColumnSettings = Body()
+):
+    """
+    Accepts the draft description for a column, promoting it to the actual column description.
+
+    Args:
+        client_options_settings: Configuration for the Dataplex client options.
+        client_settings: Project and location details.
+        table_settings: Table identifier information.
+        column_settings: Column identifier information.
+
+    Returns:
+        A message indicating success or failure.
+    """
+    try:
+        client_options = ClientOptions(
+            use_lineage_tables=client_options_settings.use_lineage_tables,
+            use_lineage_processes=client_options_settings.use_lineage_processes,
+            use_profile=client_options_settings.use_profile,
+            use_data_quality=client_options_settings.use_data_quality,
+            use_ext_documents=client_options_settings.use_ext_documents,
+            persist_to_dataplex_catalog=client_options_settings.persist_to_dataplex_catalog,
+            stage_for_review=client_options_settings.stage_for_review,
+            description_handling=client_options_settings.description_handling,
+            description_prefix=client_options_settings.description_prefix
+        )
+        client = Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+            client_options=client_options
+        )
+
+        table_fqn = f"{table_settings.project_id}.{table_settings.dataset_id}.{table_settings.table_id}"
+        logger.info(f"Accepting draft description for column {column_settings.column_name} in table: {table_fqn}")
+        client.accept_column_draft_description(table_fqn, column_settings.column_name)
+        return {"message": f"Column {column_settings.column_name} draft description accepted successfully"}
+    except Exception as e:
+        logger.exception("An error occurred while accepting column draft description") 
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
