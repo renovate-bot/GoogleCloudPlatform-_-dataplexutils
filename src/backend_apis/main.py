@@ -21,6 +21,7 @@ import dataplexutils.metadata.wizard as mw
 from dataplexutils.metadata.wizard import Client, ClientOptions
 from pydantic import BaseModel
 import logging
+import datetime
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -61,6 +62,16 @@ class DatasetSettings(BaseModel):
 class ColumnSettings(BaseModel):
     column_name: str
 
+class RegenerationCounts(BaseModel):
+    tables: int
+    columns: int
+
+class RegenerationRequest(BaseModel):
+    objects: list[str]
+
+class MarkForRegenerationRequest(BaseModel):
+    table_fqn: str
+    column_name: str | None = None
 
 app.add_middleware(
     CORSMiddleware,
@@ -384,3 +395,287 @@ async def log_requests(request: Request, call_next):
     logger.debug(f"Body: {body.decode()}")
     response = await call_next(request)
     return response
+
+# Regeneration Management APIs
+@app.get("/get_regeneration_counts")
+def get_regeneration_counts(
+    client_settings: ClientSettings = Body(),
+    dataset_settings: DatasetSettings = Body(),
+):
+    try:
+        client = mw.Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+        )
+        
+        dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
+        tables_count = client._list_tables_in_dataset_for_regeneration(dataset_fqn)
+        
+        return RegenerationCounts(
+            tables=len(tables_count),
+            columns=0  # TODO: Implement column counting
+        )
+    except Exception as e:
+        logger.error(f"Error in get_regeneration_counts: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/regenerate_selected")
+def regenerate_selected(
+    client_options_settings: ClientOptionsSettings = Body(),
+    client_settings: ClientSettings = Body(),
+    regeneration_request: RegenerationRequest = Body(),
+):
+    try:
+        client = mw.Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+            client_options=mw.ClientOptions(**client_options_settings.dict())
+        )
+        
+        results = []
+        for obj in regeneration_request.objects:
+            # TODO: Implement regeneration logic for individual objects
+            # This should handle both tables and columns
+            results.append({"object": obj, "status": "regenerated"})
+        
+        return {"regenerated_objects": results}
+    except Exception as e:
+        logger.error(f"Error in regenerate_selected: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/regenerate_all")
+def regenerate_all(
+    client_options_settings: ClientOptionsSettings = Body(),
+    client_settings: ClientSettings = Body(),
+    dataset_settings: DatasetSettings = Body(),
+):
+    try:
+        client = mw.Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+            client_options=mw.ClientOptions(**client_options_settings.dict())
+        )
+        
+        dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
+        tables = client._list_tables_in_dataset_for_regeneration(dataset_fqn)
+        
+        results = []
+        for table in tables:
+            # TODO: Implement regeneration logic for all marked objects
+            results.append({"table": table, "status": "regenerated"})
+        
+        return {"regenerated_objects": results}
+    except Exception as e:
+        logger.error(f"Error in regenerate_all: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+# Review Management Models
+class Comment(BaseModel):
+    id: str
+    text: str
+    type: str
+    timestamp: str
+
+class MetadataItem(BaseModel):
+    id: str
+    type: str
+    name: str
+    currentDescription: str
+    draftDescription: str
+    isHtml: bool
+    status: str
+    lastModified: str
+    comments: list[Comment]
+    markedForRegeneration: bool = False
+
+# Review Management APIs
+@app.post("/metadata/review")
+def get_review_items(
+    client_settings: ClientSettings = Body(),
+    dataset_settings: DatasetSettings = Body(),
+):
+    try:
+        client = mw.Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+        )
+        
+        # Ensure both project_id and dataset_id are provided
+        if not dataset_settings.project_id or not dataset_settings.dataset_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Both project_id and dataset_id must be provided"
+            )
+        
+        # Construct the dataset FQN in the correct format: project.dataset
+        dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
+        logger.info(f"Getting review items for dataset {dataset_fqn}")
+        
+        try:
+            return client._get_review_items_for_dataset(dataset_fqn)
+        except Exception as e:
+            logger.error(f"Error getting review items for dataset {dataset_fqn}: {str(e)}")
+            return {
+                "data": {
+                    "items": [],
+                    "nextPageToken": None,
+                    "totalCount": 0
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in get_review_items: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/metadata/review/{id}/accept")
+def accept_review_item(
+    id: str,
+    client_settings: ClientSettings = Body(),
+):
+    try:
+        client = mw.Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+        )
+        
+        result = client.accept_review_item(id)
+        return {"status": "accepted", "id": id, **result}
+    except Exception as e:
+        logger.error(f"Error in accept_review_item: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/metadata/review/{id}/reject")
+def reject_review_item(
+    id: str,
+    client_settings: ClientSettings = Body(),
+):
+    try:
+        client = mw.Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+        )
+        
+        result = client.reject_review_item(id)
+        return {"status": "rejected", "id": id, **result}
+    except Exception as e:
+        logger.error(f"Error in reject_review_item: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/metadata/review/{id}/edit")
+def edit_review_item(
+    id: str,
+    client_settings: ClientSettings = Body(),
+    description: str = Body(..., embed=True),
+):
+    try:
+        client = mw.Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+        )
+        
+        result = client.edit_review_item(id, description)
+        return {"status": "updated", "id": id, **result}
+    except Exception as e:
+        logger.error(f"Error in edit_review_item: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/metadata/review/{id}/comment")
+def add_review_comment(
+    id: str,
+    client_settings: ClientSettings = Body(),
+    comment: str = Body(..., embed=True),
+):
+    try:
+        client = mw.Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+        )
+        
+        # TODO: Implement comment logic
+        return {
+            "status": "added",
+            "id": id,
+            "comment": {
+                "id": "new_comment_id",
+                "text": comment,
+                "type": "human",
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in add_review_comment: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/mark_for_regeneration")
+def mark_for_regeneration(
+    client_settings: ClientSettings = Body(),
+    request: MarkForRegenerationRequest = Body(),
+):
+    """Mark a table or column for regeneration.
+
+    If column_name is provided, marks the specific column for regeneration.
+    If only table_fqn is provided, marks the entire table for regeneration.
+    """
+    try:
+        client = mw.Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
+        )
+        
+        if request.column_name:
+            success = client.mark_column_for_regeneration(request.table_fqn, request.column_name)
+            if success:
+                return {"message": f"Column {request.column_name} in table {request.table_fqn} marked for regeneration"}
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to mark column {request.column_name} for regeneration"
+                )
+        else:
+            success = client.mark_table_for_regeneration(request.table_fqn)
+            if success:
+                return {"message": f"Table {request.table_fqn} marked for regeneration"}
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to mark table {request.table_fqn} for regeneration"
+                )
+    except Exception as e:
+        logger.error(f"Error in mark_for_regeneration: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )

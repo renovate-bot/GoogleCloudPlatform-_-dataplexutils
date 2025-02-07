@@ -42,6 +42,7 @@ import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
+import { DatplexConfig } from '../App';
 
 interface Comment {
   id: string;
@@ -60,51 +61,45 @@ interface MetadataItem {
   status: 'draft' | 'accepted' | 'rejected';
   lastModified: string;
   comments: Comment[];
-  markedForRegeneration?: boolean;
+  'to-be-regenerated'?: boolean;
+  isMarkingForRegeneration?: boolean;
 }
 
 interface EditorChangeHandler {
   (content: string): void;
 }
 
-const ReviewPage = () => {
+interface ReviewPageProps {
+  config: DatplexConfig;
+}
+
+const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   const [viewMode, setViewMode] = useState<'list' | 'review'>('list');
   const [items, setItems] = useState<MetadataItem[]>([
     {
       id: '1',
       type: 'table',
-      name: 'example_dataset.example_table',
-      currentDescription: 'Original description of the table...',
-      draftDescription: 'This table contains example data...',
+      name: 'jsk-dataplex-demo-380508.metadata_generation.cc',
+      currentDescription: 'Credit card transactions table',
+      draftDescription: 'This table contains credit card transaction data including transaction details and customer information.',
       isHtml: false,
       status: 'draft',
-      lastModified: '2024-02-03',
-      comments: [
-        {
-          id: '1',
-          text: 'Description needs more context',
-          type: 'human',
-          timestamp: '2024-02-03T10:00:00Z',
-        },
-        {
-          id: '2',
-          text: 'Missing data quality information',
-          type: 'negative',
-          timestamp: '2024-02-03T10:01:00Z',
-        },
-      ],
+      lastModified: new Date().toISOString(),
+      comments: [],
+      'to-be-regenerated': false
     },
     {
       id: '2',
       type: 'column',
-      name: 'example_dataset.example_table.user_id',
-      currentDescription: 'User identifier',
-      draftDescription: 'Unique identifier for users...',
+      name: 'jsk-dataplex-demo-380508.metadata_generation.cc.transaction_id',
+      currentDescription: 'Transaction identifier',
+      draftDescription: 'Unique identifier for each credit card transaction',
       isHtml: false,
       status: 'draft',
-      lastModified: '2024-02-03',
+      lastModified: new Date().toISOString(),
       comments: [],
-    },
+      'to-be-regenerated': false
+    }
   ]);
 
   const [currentItemIndex, setCurrentItemIndex] = useState(0);
@@ -116,6 +111,13 @@ const ReviewPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [isRichText, setIsRichText] = useState(false);
   const editorRef = useRef<any>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  useEffect(() => {
+    // Initialize API URL
+    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+    setApiUrlBase(apiUrl);
+  }, []);
 
   // Add keyboard navigation
   useEffect(() => {
@@ -156,9 +158,9 @@ const ReviewPage = () => {
           top_values_in_description: true,
         },
         client_settings: {
-          project_id: '',
-          llm_location: '',
-          dataplex_location: '',
+          project_id: config.project_id,
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
         },
         table_settings: {
           project_id: project,
@@ -239,16 +241,68 @@ const ReviewPage = () => {
     }
   };
 
-  const handleMarkForRegeneration = (itemId: string) => {
-    // TODO: Implement regeneration API call
-    console.log('Marking for regeneration:', itemId);
-    setItems((prevItems) =>
-      prevItems.map((item) =>
-        item.id === itemId
-          ? { ...item, markedForRegeneration: true }
-          : item
-      )
-    );
+  const handleMarkForRegeneration = async (itemId: string) => {
+    try {
+      const item = items.find(i => i.id === itemId);
+      if (!item) {
+        throw new Error('Item not found');
+      }
+
+      // Set loading state
+      setItems((prevItems) =>
+        prevItems.map((item) =>
+          item.id === itemId
+            ? { ...item, isMarkingForRegeneration: true }
+            : item
+        )
+      );
+
+      const nameParts = item.name.split('.');
+      let table_fqn: string;
+      let column_name: string | undefined;
+
+      if (item.type === 'table') {
+        table_fqn = nameParts.slice(0, 3).join('.');
+      } else {
+        table_fqn = nameParts.slice(0, 3).join('.');
+        column_name = nameParts[3];
+      }
+
+      const response = await axios.post(`${apiUrlBase}/mark_for_regeneration`, {
+        client_settings: {
+          project_id: config.project_id,
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
+        },
+        request: {
+          table_fqn,
+          column_name
+        }
+      });
+
+      // Update success state
+      setItems((prevItems) =>
+        prevItems.map((item) =>
+          item.id === itemId
+            ? { ...item, 'to-be-regenerated': true, isMarkingForRegeneration: false }
+            : item
+        )
+      );
+
+      setError(null);
+    } catch (error: any) {
+      // Reset loading state on error
+      setItems((prevItems) =>
+        prevItems.map((item) =>
+          item.id === itemId
+            ? { ...item, isMarkingForRegeneration: false }
+            : item
+        )
+      );
+      console.error('API Error:', error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to mark item for regeneration';
+      setError(errorMessage);
+    }
   };
 
   const handleNext = () => {
@@ -367,11 +421,21 @@ const ReviewPage = () => {
         <Button
           variant="contained"
           onClick={() => handleMarkForRegeneration(currentItem.id)}
-          startIcon={<AutorenewIcon />}
-          disabled={currentItem.markedForRegeneration}
+          startIcon={<AutorenewIcon sx={{ 
+            animation: currentItem.isMarkingForRegeneration ? 'spin 1s linear infinite' : 'none',
+            '@keyframes spin': {
+              '0%': { transform: 'rotate(0deg)' },
+              '100%': { transform: 'rotate(360deg)' }
+            }
+          }} />}
+          disabled={currentItem['to-be-regenerated'] || currentItem.isMarkingForRegeneration}
           sx={{ mr: 1 }}
         >
-          {currentItem.markedForRegeneration ? 'Marked for Regeneration' : 'Mark for Regeneration'}
+          {currentItem.isMarkingForRegeneration 
+            ? 'Marking...' 
+            : currentItem['to-be-regenerated'] 
+              ? 'Marked for Regeneration' 
+              : 'Mark for Regeneration'}
         </Button>
         <Button
           variant="contained"
@@ -446,9 +510,9 @@ const ReviewPage = () => {
                     size="small"
                     color={getStatusColor(currentItem.status)}
                   />
-                  {currentItem.markedForRegeneration && (
+                  {currentItem['to-be-regenerated'] && (
                     <Chip
-                      label="Marked for Regeneration"
+                      label="To be regenerated"
                       size="small"
                       color="warning"
                       icon={<AutorenewIcon />}
@@ -549,6 +613,68 @@ const ReviewPage = () => {
     }
   };
 
+  // Update fetchReviewItems to use config
+  const fetchReviewItems = async () => {
+    try {
+      setIsRefreshing(true);
+      setError(null);
+
+      // Ensure we have required parameters
+      if (!config.project_id) {
+        setError('Project ID is not configured. Please set it in the Configuration page.');
+        return;
+      }
+
+      const response = await axios.post(`${apiUrlBase}/metadata/review`, {
+        client_settings: {
+          project_id: config.project_id,
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
+        },
+        dataset_settings: {
+          project_id: config.project_id,
+          dataset_id: "metadata_generation",  // TODO: Make this configurable
+          documentation_csv_uri: "",
+          strategy: "NAIVE"
+        }
+      });
+
+      if (!response.data || !response.data.items) {
+        setItems([]);
+        return;
+      }
+
+      // Transform the API response into MetadataItem format
+      const reviewItems: MetadataItem[] = (response.data.items || []).map((item: any) => ({
+        id: item.id || String(Math.random()),  // Fallback to random ID if none provided
+        type: item.type || 'table',
+        name: item.name || '',
+        currentDescription: item.currentDescription || '',
+        draftDescription: item.draftDescription || '',
+        isHtml: item.isHtml || false,
+        status: item.status || 'draft',
+        lastModified: item.lastModified || new Date().toISOString(),
+        comments: item.comments || [],
+        'to-be-regenerated': item.markedForRegeneration || false
+      }));
+
+      setItems(reviewItems);
+    } catch (error: any) {
+      console.error('API Error:', error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to fetch review items';
+      setError(errorMessage);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Update useEffect to use config
+  useEffect(() => {
+    if (apiUrlBase && config.project_id) {
+      fetchReviewItems();
+    }
+  }, [apiUrlBase, config.project_id]);
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -562,9 +688,9 @@ const ReviewPage = () => {
             onChange={(e, value) => value && setViewMode(value)}
             sx={{ 
               mr: 2,
-              height: 36.5, // Match MUI button default height
+              height: 36.5,
               '& .MuiToggleButton-root': {
-                padding: '6px 16px', // Match MUI button default padding
+                padding: '6px 16px',
                 textTransform: 'none',
               }
             }}
@@ -580,10 +706,17 @@ const ReviewPage = () => {
           </ToggleButtonGroup>
           <Button
             variant="contained"
-            startIcon={<RefreshIcon />}
-            onClick={() => {/* Implement refresh logic */}}
+            startIcon={<RefreshIcon sx={{ 
+              animation: isRefreshing ? 'spin 1s linear infinite' : 'none',
+              '@keyframes spin': {
+                '0%': { transform: 'rotate(0deg)' },
+                '100%': { transform: 'rotate(360deg)' }
+              }
+            }} />}
+            onClick={fetchReviewItems}
+            disabled={isRefreshing}
           >
-            Refresh
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
           </Button>
         </Box>
       </Box>
@@ -591,6 +724,18 @@ const ReviewPage = () => {
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
+        </Alert>
+      )}
+
+      {isRefreshing && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          Fetching review items from Dataplex catalog...
+        </Alert>
+      )}
+
+      {!isRefreshing && items.length === 0 && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          No items found for review.
         </Alert>
       )}
 

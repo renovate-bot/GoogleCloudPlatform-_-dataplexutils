@@ -13,6 +13,7 @@ import MenuIcon from '@mui/icons-material/Menu';
 import SearchIcon from '@mui/icons-material/Search';
 import HelpIcon from '@mui/icons-material/Help';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import TaskTracker, { Task } from '../TaskTracker';
 
 const Search = styled('div')(({ theme }: { theme: Theme }) => ({
   position: 'relative',
@@ -54,7 +55,11 @@ const StyledInputBase = styled(InputBase)(({ theme }: { theme: Theme }) => ({
   },
 }));
 
-const TopNavBar = () => {
+interface TopNavBarProps {
+  tasks: Task[];
+}
+
+const TopNavBar: React.FC<TopNavBarProps> = ({ tasks }) => {
   return (
     <AppBar 
       position="fixed" 
@@ -95,8 +100,11 @@ const TopNavBar = () => {
             inputProps={{ 'aria-label': 'search' }}
           />
         </Search>
+        
         <Box sx={{ flexGrow: 1 }} />
-        <Box sx={{ display: { xs: 'none', md: 'flex' } }}>
+        
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TaskTracker tasks={tasks} />
           <IconButton
             size="large"
             aria-label="help"

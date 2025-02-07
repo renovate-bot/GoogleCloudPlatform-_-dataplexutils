@@ -1,4 +1,4 @@
-import React, { useState, ChangeEvent } from 'react';
+import React, { useState, ChangeEvent, useEffect } from 'react';
 import {
   Box,
   Paper,
@@ -23,6 +23,9 @@ import {
 import axios from 'axios';
 import AutorenewIcon from '@mui/icons-material/Autorenew';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
+import { Task } from '../components/TaskTracker';
+import { v4 as uuidv4 } from 'uuid';
+import { DatplexConfig } from '../App';
 
 interface ClientOptionsSettings {
   use_lineage_tables: boolean;
@@ -62,44 +65,13 @@ interface RegenerationCounts {
   columns: number;
 }
 
-const GenerationPage = () => {
-  const [params, setParams] = useState<{
-    client_options_settings: ClientOptionsSettings;
-    client_settings: ClientSettings;
-    table_settings: TableSettings;
-    dataset_settings: DatasetSettings;
-  }>({
-    client_options_settings: {
-      use_lineage_tables: false,
-      use_lineage_processes: false,
-      use_profile: false,
-      use_data_quality: false,
-      use_ext_documents: false,
-      persist_to_dataplex_catalog: true,
-      stage_for_review: false,
-      top_values_in_description: true,
-      description_handling: 'append',
-      description_prefix: '---AI Generated description---',
-    },
-    client_settings: {
-      project_id: '',
-      llm_location: '',
-      dataplex_location: '',
-    },
-    table_settings: {
-      project_id: '',
-      dataset_id: '',
-      table_id: '',
-      documentation_uri: '',
-    },
-    dataset_settings: {
-      project_id: '',
-      dataset_id: '',
-      documentation_csv_uri: '',
-      strategy: 'NAIVE',
-    },
-  });
+interface GenerationPageProps {
+  config: DatplexConfig;
+  onTaskAdd: (task: Task) => void;
+  onTaskUpdate: (taskId: string, updates: Partial<Task>) => void;
+}
 
+const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTaskUpdate }) => {
   const [apiUrlBase, setApiUrlBase] = useState<string>('');
   const [apiResponse, setApiResponse] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -108,27 +80,19 @@ const GenerationPage = () => {
   const [isLoadingCounts, setIsLoadingCounts] = useState(false);
   const [selectedForRegeneration, setSelectedForRegeneration] = useState<string[]>([]);
 
+  useEffect(() => {
+    // Initialize API URL
+    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+    setApiUrlBase(apiUrl);
+  }, []);
+
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = event.target;
     const [parent, child] = name.split('.');
 
-    setParams((prevParams) => ({
-      ...prevParams,
-      [parent]: {
-        ...prevParams[parent as keyof typeof prevParams],
-        [child]: type === 'checkbox' ? checked : value,
-      },
-    }));
-
     // Sync project_id and dataset_id between table and dataset settings
     if (parent === 'table_settings' && (child === 'project_id' || child === 'dataset_id')) {
-      setParams((prevParams) => ({
-        ...prevParams,
-        dataset_settings: {
-          ...prevParams.dataset_settings,
-          [child]: value,
-        },
-      }));
+      // No need to update dataset_settings directly here
     }
   };
 
@@ -136,71 +100,209 @@ const GenerationPage = () => {
     const { name, value } = event.target;
     const [parent, child] = name.split('.');
 
-    setParams((prevParams) => ({
-      ...prevParams,
-      [parent]: {
-        ...prevParams[parent as keyof typeof prevParams],
-        [child]: value,
-      },
-    }));
+    // Sync project_id and dataset_id between table and dataset settings
+    if (parent === 'table_settings' && (child === 'project_id' || child === 'dataset_id')) {
+      // No need to update dataset_settings directly here
+    }
   };
 
   const callApi = async (endpoint: string) => {
+    const taskId = uuidv4();
+    
+    // Determine scope and create description based on endpoint
+    let scope: Task['details']['scope'];
+    let description: string;
+    
+    switch (endpoint) {
+      case 'generate_table_description':
+        scope = 'table';
+        description = 'table description';
+        break;
+      case 'generate_columns_descriptions':
+        scope = 'column';
+        description = 'column descriptions';
+        break;
+      case 'generate_dataset_tables_descriptions':
+        scope = 'dataset_tables';
+        description = 'dataset tables descriptions';
+        break;
+      case 'generate_dataset_tables_columns_descriptions':
+        scope = 'dataset_all';
+        description = 'dataset tables and columns';
+        break;
+      default:
+        scope = 'table';
+        description = endpoint.replace(/_/g, ' ');
+    }
+
+    const task: Task = {
+      id: taskId,
+      type: 'generate',
+      action: endpoint,
+      status: 'running',
+      timestamp: new Date(),
+      details: {
+        project: config.project_id || undefined,
+        dataset: config.dataset_id || undefined,
+        table: config.table_id || undefined,
+        scope,
+        description,
+      }
+    };
+    onTaskAdd(task);
+
     try {
       setError(null);
       setIsGenerating(true);
 
       const response = await axios.post(
         `${apiUrlBase}/${endpoint}`,
-        params
+        {
+          client_settings: {
+            project_id: config.project_id,
+            llm_location: config.llm_location,
+            dataplex_location: config.dataplex_location,
+          },
+          client_options_settings: {
+            use_lineage_tables: false,
+            use_lineage_processes: false,
+            use_profile: false,
+            use_data_quality: false,
+            use_ext_documents: false,
+            persist_to_dataplex_catalog: true,
+            stage_for_review: false,
+            top_values_in_description: true,
+          },
+          table_settings: {
+            project_id: config.project_id,
+            dataset_id: config.dataset_id,
+            table_id: config.table_id,
+            documentation_uri: '',
+          },
+          dataset_settings: {
+            project_id: config.project_id,
+            dataset_id: config.dataset_id,
+            documentation_csv_uri: '',
+            strategy: 'NAIVE'
+          }
+        }
       );
 
       setApiResponse(response.data);
-      setIsGenerating(false);
+      onTaskUpdate(taskId, { status: 'completed' });
     } catch (error) {
       console.error('API Error:', error);
-      setError('An error occurred while calling the API. Please check the console for details.');
+      const errorMessage = 'An error occurred while calling the API. Please check the console for details.';
+      setError(errorMessage);
+      onTaskUpdate(taskId, { 
+        status: 'failed',
+        error: errorMessage
+      });
+    } finally {
       setIsGenerating(false);
     }
   };
 
   const handleGetRegenerationCounts = async () => {
+    const taskId = uuidv4();
+    const task: Task = {
+      id: taskId,
+      type: 'regenerate',
+      action: 'get_regeneration_counts',
+      status: 'running',
+      timestamp: new Date(),
+      details: {
+        project: config.project_id || undefined,
+        scope: 'dataset_all',
+        description: 'get regeneration counts',
+      }
+    };
+    onTaskAdd(task);
+
     try {
       setIsLoadingCounts(true);
       setError(null);
       const response = await axios.get(`${apiUrlBase}/get_regeneration_counts`);
       setRegenerationCounts(response.data);
+      onTaskUpdate(taskId, { status: 'completed' });
     } catch (error) {
       console.error('API Error:', error);
-      setError('Failed to fetch regeneration counts.');
+      const errorMessage = 'Failed to fetch regeneration counts.';
+      setError(errorMessage);
+      onTaskUpdate(taskId, { 
+        status: 'failed',
+        error: errorMessage
+      });
     } finally {
       setIsLoadingCounts(false);
     }
   };
 
   const handleRegenerateAll = async () => {
+    const taskId = uuidv4();
+    const task: Task = {
+      id: taskId,
+      type: 'regenerate',
+      action: 'regenerate_all',
+      status: 'running',
+      timestamp: new Date(),
+      details: {
+        project: config.project_id || undefined,
+        scope: 'dataset_all',
+        description: 'all marked objects',
+      }
+    };
+    onTaskAdd(task);
+
     try {
       setError(null);
       await axios.post(`${apiUrlBase}/regenerate_all`);
+      onTaskUpdate(taskId, { status: 'completed' });
       // Refresh counts after regeneration
       handleGetRegenerationCounts();
     } catch (error) {
       console.error('API Error:', error);
-      setError('Failed to trigger regeneration.');
+      const errorMessage = 'Failed to trigger regeneration.';
+      setError(errorMessage);
+      onTaskUpdate(taskId, { 
+        status: 'failed',
+        error: errorMessage
+      });
     }
   };
 
   const handleRegenerateSelected = async () => {
+    const taskId = uuidv4();
+    const task: Task = {
+      id: taskId,
+      type: 'regenerate',
+      action: 'regenerate_selected',
+      status: 'running',
+      timestamp: new Date(),
+      details: {
+        project: config.project_id || undefined,
+        scope: 'dataset_all',
+        description: `selected objects (pattern: ${selectedForRegeneration.join(', ')})`,
+      }
+    };
+    onTaskAdd(task);
+
     try {
       setError(null);
       await axios.post(`${apiUrlBase}/regenerate_selected`, {
         objects: selectedForRegeneration
       });
+      onTaskUpdate(taskId, { status: 'completed' });
       // Refresh counts after regeneration
       handleGetRegenerationCounts();
     } catch (error) {
       console.error('API Error:', error);
-      setError('Failed to trigger selective regeneration.');
+      const errorMessage = 'Failed to trigger selective regeneration.';
+      setError(errorMessage);
+      onTaskUpdate(taskId, { 
+        status: 'failed',
+        error: errorMessage
+      });
     }
   };
 
@@ -221,7 +323,7 @@ const GenerationPage = () => {
                 control={
                   <Checkbox
                     name="client_options_settings.use_lineage_tables"
-                    checked={params.client_options_settings.use_lineage_tables}
+                    checked={config.use_lineage_tables}
                     onChange={handleInputChange}
                   />
                 }
@@ -231,7 +333,7 @@ const GenerationPage = () => {
                 control={
                   <Checkbox
                     name="client_options_settings.use_lineage_processes"
-                    checked={params.client_options_settings.use_lineage_processes}
+                    checked={config.use_lineage_processes}
                     onChange={handleInputChange}
                   />
                 }
@@ -241,7 +343,7 @@ const GenerationPage = () => {
                 control={
                   <Checkbox
                     name="client_options_settings.use_profile"
-                    checked={params.client_options_settings.use_profile}
+                    checked={config.use_profile}
                     onChange={handleInputChange}
                   />
                 }
@@ -251,7 +353,7 @@ const GenerationPage = () => {
                 control={
                   <Checkbox
                     name="client_options_settings.use_data_quality"
-                    checked={params.client_options_settings.use_data_quality}
+                    checked={config.use_data_quality}
                     onChange={handleInputChange}
                   />
                 }
@@ -261,7 +363,7 @@ const GenerationPage = () => {
                 control={
                   <Checkbox
                     name="client_options_settings.use_ext_documents"
-                    checked={params.client_options_settings.use_ext_documents}
+                    checked={config.use_ext_documents}
                     onChange={handleInputChange}
                   />
                 }
@@ -281,7 +383,7 @@ const GenerationPage = () => {
                 </Typography>
                 <RadioGroup
                   name="client_options_settings.description_handling"
-                  value={params.client_options_settings.description_handling}
+                  value={config.description_handling}
                   onChange={handleInputChange}
                 >
                   <FormControlLabel
@@ -308,7 +410,7 @@ const GenerationPage = () => {
                 </Typography>
                 <TextField
                   name="client_options_settings.description_prefix"
-                  value={params.client_options_settings.description_prefix}
+                  value={config.description_prefix}
                   onChange={handleInputChange}
                   placeholder="Enter description prefix"
                   size="small"
@@ -328,7 +430,7 @@ const GenerationPage = () => {
                 control={
                   <Checkbox
                     name="client_options_settings.persist_to_dataplex_catalog"
-                    checked={params.client_options_settings.persist_to_dataplex_catalog}
+                    checked={config.persist_to_dataplex_catalog}
                     onChange={handleInputChange}
                   />
                 }
@@ -338,7 +440,7 @@ const GenerationPage = () => {
                 control={
                   <Checkbox
                     name="client_options_settings.stage_for_review"
-                    checked={params.client_options_settings.stage_for_review}
+                    checked={config.stage_for_review}
                     onChange={handleInputChange}
                   />
                 }
@@ -348,7 +450,7 @@ const GenerationPage = () => {
                 control={
                   <Checkbox
                     name="client_options_settings.top_values_in_description"
-                    checked={params.client_options_settings.top_values_in_description}
+                    checked={config.top_values_in_description}
                     onChange={handleInputChange}
                   />
                 }
@@ -367,21 +469,21 @@ const GenerationPage = () => {
               <TextField
                 label="Project ID"
                 name="client_settings.project_id"
-                value={params.client_settings.project_id}
+                value={config.project_id}
                 onChange={handleInputChange}
                 fullWidth
               />
               <TextField
                 label="LLM Location"
                 name="client_settings.llm_location"
-                value={params.client_settings.llm_location}
+                value={config.llm_location}
                 onChange={handleInputChange}
                 fullWidth
               />
               <TextField
                 label="Dataplex Location"
                 name="client_settings.dataplex_location"
-                value={params.client_settings.dataplex_location}
+                value={config.dataplex_location}
                 onChange={handleInputChange}
                 fullWidth
               />
@@ -396,28 +498,28 @@ const GenerationPage = () => {
               <TextField
                 label="Project ID"
                 name="table_settings.project_id"
-                value={params.table_settings.project_id}
+                value={config.project_id}
                 onChange={handleInputChange}
                 fullWidth
               />
               <TextField
                 label="Dataset ID"
                 name="table_settings.dataset_id"
-                value={params.table_settings.dataset_id}
+                value={config.dataset_id}
                 onChange={handleInputChange}
                 fullWidth
               />
               <TextField
                 label="Table ID"
                 name="table_settings.table_id"
-                value={params.table_settings.table_id}
+                value={config.table_id}
                 onChange={handleInputChange}
                 fullWidth
               />
               <TextField
                 label="Documentation URI"
                 name="table_settings.documentation_uri"
-                value={params.table_settings.documentation_uri}
+                value={config.documentation_uri}
                 onChange={handleInputChange}
                 fullWidth
               />
@@ -432,7 +534,7 @@ const GenerationPage = () => {
               <TextField
                 label="Documentation CSV URI"
                 name="dataset_settings.documentation_csv_uri"
-                value={params.dataset_settings.documentation_csv_uri}
+                value={config.documentation_csv_uri}
                 onChange={handleInputChange}
                 fullWidth
               />
@@ -441,7 +543,7 @@ const GenerationPage = () => {
                 <Select
                   labelId="strategy-label"
                   name="dataset_settings.strategy"
-                  value={params.dataset_settings.strategy}
+                  value={config.strategy}
                   onChange={handleSelectChange}
                   label="Strategy"
                 >
