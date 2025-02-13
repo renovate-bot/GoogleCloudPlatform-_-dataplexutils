@@ -543,27 +543,6 @@ def get_review_items(
             detail=str(e)
         )
 
-@app.post("/metadata/review/{id}/accept")
-def accept_review_item(
-    id: str,
-    client_settings: ClientSettings = Body(),
-):
-    try:
-        client = mw.Client(
-            project_id=client_settings.project_id,
-            llm_location=client_settings.llm_location,
-            dataplex_location=client_settings.dataplex_location,
-        )
-        
-        result = client.accept_review_item(id)
-        return {"status": "accepted", "id": id, **result}
-    except Exception as e:
-        logger.error(f"Error in accept_review_item: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
 @app.post("/metadata/review/{id}/reject")
 def reject_review_item(
     id: str,
@@ -675,6 +654,47 @@ def mark_for_regeneration(
                 )
     except Exception as e:
         logger.error(f"Error in mark_for_regeneration: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/metadata/review/{id}/details")
+def get_review_item_details(
+    id: str,
+    project_id: str = Body(...),
+    llm_location: str = Body(...),
+    dataplex_location: str = Body(...),
+):
+    """Get detailed information about a review item.
+    
+    Args:
+        id: The ID of the review item (table_fqn#type)
+        project_id: Project ID for Dataplex
+        llm_location: Location for LLM
+        dataplex_location: Location for Dataplex
+        
+    Returns:
+        Detailed information about the review item
+    """
+    try:
+        logger.info(f"Getting details for review item: {id}")
+        
+        # Extract table FQN from the ID
+        table_fqn = id.split('#')[0]
+        logger.info(f"Extracted table FQN: {table_fqn}")
+        
+        client = mw.Client(
+            project_id=project_id,
+            llm_location=llm_location,
+            dataplex_location=dataplex_location,
+        )
+        
+        result = client.get_review_item_details(table_fqn)
+        return {"data": result}
+        
+    except Exception as e:
+        logger.error(f"Error getting review item details: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

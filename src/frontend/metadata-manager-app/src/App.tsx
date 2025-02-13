@@ -7,25 +7,9 @@ import LeftMenu from './components/navigation/LeftMenu';
 import ReviewPage from './pages/ReviewPage';
 import GenerationPage from './pages/GenerationPage';
 import ConfigurationPage from './pages/ConfigurationPage';
-import SLADashboard from './pages/contracts/SLADashboard';
-import ContractTemplates from './pages/contracts/ContractTemplates';
-import ContractCompliance from './pages/contracts/ContractCompliance';
-import SLAGenerator from './pages/contracts/SLAGenerator';
-import ContractTerms from './pages/contracts/ContractTerms';
-import DataProductEvaluation from './pages/contracts/DataProductEvaluation';
-import DataProductDiagnostics from './pages/contracts/DataProductDiagnostics';
-import DiagnosticsOverview from './pages/contracts/DiagnosticsOverview';
 import { Task } from './components/TaskTracker';
-import ComplianceOverview from './pages/compliance/ComplianceOverview';
-import DataSensitivity from './pages/compliance/DataSensitivity';
-import AccessPolicies from './pages/compliance/AccessPolicies';
-import RetentionPolicies from './pages/compliance/RetentionPolicies';
-import GovernancePolicies from './pages/compliance/GovernancePolicies';
-import PublishingOverview from './pages/publishing/PublishingOverview';
-import Marketplaces from './pages/publishing/Marketplaces';
-import PublishingHistory from './pages/publishing/PublishingHistory';
-import PublishingDestinations from './pages/publishing/PublishingDestinations';
-import PublishingSettings from './pages/publishing/PublishingSettings';
+import { CacheProvider } from './contexts/CacheContext';
+import { ReviewProvider } from './contexts/ReviewContext';
 
 export interface DatplexConfig {
   // Client Settings
@@ -87,11 +71,11 @@ function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
 
   const handleTaskAdd = (task: Task) => {
-    setTasks(prev => [task, ...prev].slice(0, 50)); // Keep last 50 tasks
+    setTasks([...tasks, task]);
   };
 
   const handleTaskUpdate = (taskId: string, updates: Partial<Task>) => {
-    setTasks(prev => prev.map(task => 
+    setTasks(tasks.map(task => 
       task.id === taskId ? { ...task, ...updates } : task
     ));
   };
@@ -157,122 +141,46 @@ function App() {
   });
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Router>
-        <Box sx={{ display: 'flex' }}>
-          <TopNavBar tasks={tasks} />
-          <LeftMenu />
-          <Box
-            component="main"
-            sx={{
-              flexGrow: 1,
-              p: 3,
-              mt: 8,
-              width: { sm: `calc(100% - ${240}px)` },
-              ml: { sm: `${240}px` }
-            }}
-          >
-            <Routes>
-              <Route 
-                path="/" 
-                element={<ConfigurationPage config={dataplexConfig} onConfigChange={setDataplexConfig} />} 
-              />
-              <Route 
-                path="/review" 
-                element={<ReviewPage config={dataplexConfig} />} 
-              />
-              <Route 
-                path="/generate" 
-                element={
-                  <GenerationPage 
-                    config={dataplexConfig} 
-                    onTaskAdd={handleTaskAdd}
-                    onTaskUpdate={handleTaskUpdate}
+    <CacheProvider>
+      <ReviewProvider>
+        <ThemeProvider theme={theme}>
+          <Router>
+            <Box sx={{ display: 'flex' }}>
+              <CssBaseline />
+              <TopNavBar tasks={tasks} />
+              <LeftMenu />
+              <Box component="main" sx={{ flexGrow: 1, p: 3, mt: 8, width: { sm: `calc(100% - ${240}px)` }, ml: { sm: `${240}px` } }}>
+                <Routes>
+                  <Route 
+                    path="/" 
+                    element={
+                      <GenerationPage 
+                        config={dataplexConfig}
+                        onTaskAdd={handleTaskAdd}
+                        onTaskUpdate={handleTaskUpdate}
+                      />
+                    } 
                   />
-                } 
-              />
-              <Route 
-                path="/configuration" 
-                element={<ConfigurationPage config={dataplexConfig} onConfigChange={setDataplexConfig} />} 
-              />
-              <Route 
-                path="/contracts" 
-                element={<DataProductEvaluation />} 
-              />
-              <Route 
-                path="/contracts/diagnostics" 
-                element={<DiagnosticsOverview />} 
-              />
-              <Route 
-                path="/contracts/diagnostics/:productId" 
-                element={<DataProductDiagnostics />} 
-              />
-              <Route 
-                path="/contracts/dashboard" 
-                element={<SLADashboard />} 
-              />
-              <Route 
-                path="/contracts/templates" 
-                element={<ContractTemplates />} 
-              />
-              <Route 
-                path="/contracts/compliance" 
-                element={<ContractCompliance />} 
-              />
-              <Route 
-                path="/contracts/sla-generator" 
-                element={<SLAGenerator />} 
-              />
-              <Route 
-                path="/contracts/terms" 
-                element={<ContractTerms />} 
-              />
-              <Route 
-                path="/compliance" 
-                element={<ComplianceOverview />} 
-              />
-              <Route 
-                path="/compliance/sensitivity" 
-                element={<DataSensitivity />} 
-              />
-              <Route 
-                path="/compliance/access" 
-                element={<AccessPolicies />} 
-              />
-              <Route 
-                path="/compliance/retention" 
-                element={<RetentionPolicies />} 
-              />
-              <Route 
-                path="/compliance/governance" 
-                element={<GovernancePolicies />} 
-              />
-              <Route 
-                path="/publishing" 
-                element={<PublishingOverview />} 
-              />
-              <Route 
-                path="/publishing/marketplaces" 
-                element={<Marketplaces />} 
-              />
-              <Route 
-                path="/publishing/history" 
-                element={<PublishingHistory />} 
-              />
-              <Route 
-                path="/publishing/destinations" 
-                element={<PublishingDestinations />} 
-              />
-              <Route 
-                path="/publishing/settings" 
-                element={<PublishingSettings />} 
-              />
-            </Routes>
-          </Box>
-        </Box>
-      </Router>
-    </ThemeProvider>
+                  <Route 
+                    path="/review" 
+                    element={<ReviewPage config={dataplexConfig} />} 
+                  />
+                  <Route 
+                    path="/configuration" 
+                    element={
+                      <ConfigurationPage 
+                        config={dataplexConfig} 
+                        onConfigChange={setDataplexConfig}
+                      />
+                    } 
+                  />
+                </Routes>
+              </Box>
+            </Box>
+          </Router>
+        </ThemeProvider>
+      </ReviewProvider>
+    </CacheProvider>
   );
 }
 
