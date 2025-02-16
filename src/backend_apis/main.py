@@ -22,6 +22,11 @@ from dataplexutils.metadata.wizard import Client, ClientOptions
 from pydantic import BaseModel
 import logging
 import datetime
+import traceback
+from pydantic import ValidationError
+import json
+import uuid
+from google.cloud import dataplex_v1
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -51,7 +56,7 @@ class TableSettings(BaseModel):
     project_id: str
     dataset_id: str
     table_id: str
-    documentation_uri: str
+    documentation_uri: str | None = None
 
 class DatasetSettings(BaseModel):
     project_id: str
@@ -72,6 +77,23 @@ class RegenerationRequest(BaseModel):
 class MarkForRegenerationRequest(BaseModel):
     table_fqn: str
     column_name: str | None = None
+
+class UpdateDraftDescriptionRequest(BaseModel):
+    client_settings: ClientSettings
+    table_settings: TableSettings
+    description: str
+    is_html: bool
+
+class AddCommentRequest(BaseModel):
+    client_settings: ClientSettings
+    table_settings: TableSettings
+    comment: str
+    column_name: str | None = None
+
+class AddNegativeExampleRequest(BaseModel):
+    client_settings: ClientSettings
+    table_settings: TableSettings
+    example: str
 
 app.add_middleware(
     CORSMiddleware,
@@ -302,6 +324,7 @@ def accept_table_draft_description(
         A message indicating success or failure.
     """
     try:
+        logger.info("=== START: accept_table_draft_description ===")
         client_options = ClientOptions(
             use_lineage_tables=client_options_settings.use_lineage_tables,
             use_lineage_processes=client_options_settings.use_lineage_processes,
@@ -322,13 +345,52 @@ def accept_table_draft_description(
 
         table_fqn = f"{table_settings.project_id}.{table_settings.dataset_id}.{table_settings.table_id}"
         logger.info(f"Accepting draft description for table: {table_fqn}")
+        
+        # Get existing comments and negative examples
+        existing_comments = client.get_comments_to_table_draft_description(table_fqn) or []
+        existing_negative_examples = client.get_negative_examples_to_table_draft_description(table_fqn) or []
+        
+        # First, update the aspect metadata to mark it as accepted
+        # Only use fields that are defined in the aspect template
+        aspect_content = {
+            "certified": "true",
+            "user-who-certified": "system",  # You might want to pass the actual user from the frontend
+            "contents": client._get_table_draft_description(table_fqn),
+            "generation-date": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "to-be-regenerated": "false",
+            "human-comments": existing_comments,  # Preserve existing comments
+            "negative-examples": existing_negative_examples,  # Preserve existing negative examples
+            "external-document-uri": table_settings.documentation_uri if hasattr(table_settings, 'documentation_uri') else "",
+            "is-accepted": True,
+            "when-accepted": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        }
+        
+        # Update the aspect with the new metadata
+        success = client._update_table_draft_description(
+            table_fqn=table_fqn,
+            description=aspect_content["contents"],
+            metadata=aspect_content
+        )
+        
+        if not success:
+            raise Exception("Failed to update aspect metadata")
+        
+        # Then promote the draft description to the actual description
         client.accept_table_draft_description(table_fqn)
+        
+        logger.info("Draft description accepted and metadata updated successfully")
         return {"message": "Table draft description accepted successfully"}
     except Exception as e:
-        logger.exception("An error occurred while accepting table draft description") 
+        logger.error("=== ERROR in accept_table_draft_description ===")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=str(e)
         )
+    finally:
+        logger.info("=== END: accept_table_draft_description ===")
 
 @app.post("/accept_column_draft_description")
 def accept_column_draft_description(
@@ -659,42 +721,239 @@ def mark_for_regeneration(
             detail=str(e)
         )
 
-@app.post("/metadata/review/{id}/details")
+@app.post("/metadata/review/details")
 def get_review_item_details(
-    id: str,
-    project_id: str = Body(...),
-    llm_location: str = Body(...),
-    dataplex_location: str = Body(...),
+    client_settings: ClientSettings = Body(),
+    table_settings: TableSettings = Body(),
+    column_name: str = Body(None),
 ):
     """Get detailed information about a review item.
     
     Args:
-        id: The ID of the review item (table_fqn#type)
-        project_id: Project ID for Dataplex
-        llm_location: Location for LLM
-        dataplex_location: Location for Dataplex
-        
+        client_settings: Project and location details
+        table_settings: Table identifier information
+        column_name: Optional column name. If provided, returns column details
+    
     Returns:
         Detailed information about the review item
     """
     try:
-        logger.info(f"Getting details for review item: {id}")
+        logger.info(f"Getting details for table: {table_settings.project_id}.{table_settings.dataset_id}.{table_settings.table_id}")
+        if column_name:
+            logger.info(f"Column: {column_name}")
         
-        # Extract table FQN from the ID
-        table_fqn = id.split('#')[0]
-        logger.info(f"Extracted table FQN: {table_fqn}")
-        
-        client = mw.Client(
-            project_id=project_id,
-            llm_location=llm_location,
-            dataplex_location=dataplex_location,
+        client = Client(
+            project_id=client_settings.project_id,
+            llm_location=client_settings.llm_location,
+            dataplex_location=client_settings.dataplex_location,
         )
         
-        result = client.get_review_item_details(table_fqn)
-        return {"data": result}
+        table_fqn = f"{table_settings.project_id}.{table_settings.dataset_id}.{table_settings.table_id}"
+        
+        if column_name:
+            # Get column details
+            details = client.get_review_item_details(table_fqn, column_name)
+        else:
+            # Get table details
+            details = client.get_review_item_details(table_fqn)
+            
+        if not details:
+            raise ValueError(f"No details found for {'column ' + column_name if column_name else 'table'} {table_fqn}")
+        
+        # Wrap the response in a data field
+        return {"data": details}
+
+    except Exception as e:
+        logger.error(f"Error getting review item details for table {table_fqn} column {column_name}: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.post("/update_table_draft_description")
+async def update_table_draft_description(request: Request, update_request: UpdateDraftDescriptionRequest):
+    """Update the draft description for a table.
+    
+    Args:
+        request: The raw request object for logging
+        update_request: Request containing client settings, table settings, and the new description
+    
+    Returns:
+        A dictionary with the status of the update operation
+    """
+    try:
+        # Log the raw request body
+        body = await request.body()
+        logger.info("=== START: update_table_draft_description ===")
+        logger.info(f"Raw request body: {body.decode()}")
+        logger.info(f"Parsed request: {update_request.dict()}")
+        
+        wizard = Client(
+            project_id=update_request.client_settings.project_id,
+            llm_location=update_request.client_settings.llm_location,
+            dataplex_location=update_request.client_settings.dataplex_location
+        )
+        
+        # Construct the table FQN
+        table_fqn = f"{update_request.table_settings.project_id}.{update_request.table_settings.dataset_id}.{update_request.table_settings.table_id}"
+        logger.info(f"Constructed table FQN: {table_fqn}")
+        
+        # Update the draft description
+        logger.info(f"Updating draft description. Length: {len(update_request.description)}")
+        logger.info(f"Is HTML: {update_request.is_html}")
+        
+        success = wizard._update_table_draft_description(
+            table_fqn=table_fqn,
+            description=update_request.description
+        )
+        
+        if success:
+            logger.info("Draft description updated successfully")
+            return {
+                "status": "success",
+                "message": "Draft description updated successfully"
+            }
+        else:
+            logger.error("Failed to update draft description (returned False)")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to update draft description"
+            )
+        
+    except ValidationError as e:
+        # Log validation errors in detail
+        logger.error("=== Validation Error ===")
+        logger.error(f"Error details: {e.errors()}")
+        logger.error(f"Error JSON: {e.json()}")
+        raise HTTPException(
+            status_code=422,
+            detail=f"Validation error: {str(e)}"
+        )
+    except Exception as e:
+        logger.error("=== Error in update_table_draft_description ===")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update draft description: {str(e)}"
+        )
+    finally:
+        logger.info("=== END: update_table_draft_description ===")
+
+@app.post("/metadata/review/add_comment")
+def add_comment(request: AddCommentRequest):
+    """Add a comment to a table or column's draft description.
+    
+    Args:
+        request: Contains client settings, table settings, and the comment to add
+    
+    Returns:
+        The newly added comment object
+    """
+    try:
+        logger.info("=== START: add_comment ===")
+        client = Client(
+            project_id=request.client_settings.project_id,
+            llm_location=request.client_settings.llm_location,
+            dataplex_location=request.client_settings.dataplex_location,
+        )
+        
+        table_fqn = f"{request.table_settings.project_id}.{request.table_settings.dataset_id}.{request.table_settings.table_id}"
+        logger.info(f"Adding comment to table: {table_fqn}")
+        
+        # Create new comment object
+        new_comment = {
+            "id": str(uuid.uuid4()),
+            "text": request.comment,
+            "type": "human",
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+        
+        if request.column_name:
+            success = client.add_comment_to_column_draft_description(table_fqn, request.column_name, request.comment)
+        else:
+            success = client.add_comment_to_table_draft_description(table_fqn, request.comment)
+            
+        if not success:
+            logger.error("Failed to add comment")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to add comment"
+            )
+            
+        logger.info("Comment added successfully")
+        logger.info(f"New comment: {new_comment}")
+        return new_comment
         
     except Exception as e:
-        logger.error(f"Error getting review item details: {str(e)}")
+        logger.error(f"Error adding comment: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+    finally:
+        logger.info("=== END: add_comment ===")
+
+@app.post("/metadata/review/add_negative_example")
+def add_negative_example(request: AddNegativeExampleRequest):
+    """Add a negative example to a table's draft description.
+    
+    Args:
+        request: Contains client settings, table settings, and the negative example to add
+    
+    Returns:
+        The newly added negative example object
+    """
+    try:
+        client = Client(
+            project_id=request.client_settings.project_id,
+            llm_location=request.client_settings.llm_location,
+            dataplex_location=request.client_settings.dataplex_location,
+        )
+        
+        table_fqn = f"{request.table_settings.project_id}.{request.table_settings.dataset_id}.{request.table_settings.table_id}"
+        
+        # Get existing aspect
+        existing_comments = client.get_comments_to_table_draft_description(table_fqn) or []
+        existing_negative_examples = client.get_negative_examples_to_table_draft_description(table_fqn) or []
+        
+        # Create new negative example
+        new_example = {
+            "id": str(uuid.uuid4()),
+            "text": request.example,
+            "type": "negative",
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+        
+        # Add to existing examples
+        existing_negative_examples.append(new_example)
+        
+        # Update aspect with new metadata
+        aspect_content = {
+            "negative-examples": existing_negative_examples,
+            "human-comments": existing_comments
+        }
+        
+        success = client._update_table_draft_description(
+            table_fqn=table_fqn,
+            description=client._get_table_draft_description(table_fqn),
+            metadata=aspect_content
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to add negative example"
+            )
+            
+        return new_example
+        
+    except Exception as e:
+        logger.error(f"Error adding negative example: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
