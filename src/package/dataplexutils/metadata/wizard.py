@@ -60,178 +60,9 @@ constants = toml.loads(pkgutil.get_data(__name__, "constants.toml").decode())
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(constants["LOGGING"]["WIZARD_LOGGER"])
 
-
-class PromtType(Enum):
-    PROMPT_TYPE_TABLE = 0
-    PROMPT_TYPE_COLUMN = 1
-
-
-class PromptManager:
-    """Represents a prompt manager."""
-
-    def __init__(self, prompt_type, client_options):
-        self._prompt_type = prompt_type
-        self._client_options = client_options
-
-    def get_promtp(self):
-        try:
-            if self._prompt_type == PromtType.PROMPT_TYPE_TABLE:
-                return self._get_prompt_table()
-            elif self._prompt_type == PromtType.PROMPT_TYPE_COLUMN:
-                return self._get_prompt_columns()
-            else:
-                return None
-        except Exception as e:
-            logger.error(f"Exception: {e}.")
-            raise e
-
-    def _get_prompt_table(self):
-        try:
-            # System
-            table_description_prompt = constants["PROMPTS"]["SYSTEM_PROMPT"]
-            # Base
-            table_description_prompt = (
-                table_description_prompt
-                + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_BASE"]
-            )
-            # Additional metadata information
-            if self._client_options._use_profile:
-                table_description_prompt = (
-                    table_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_PROFILE"]
-                )
-            if self._client_options._use_data_quality:
-                table_description_prompt = (
-                    table_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_QUALITY"]
-                )
-            if self._client_options._use_lineage_tables:
-                table_description_prompt = (
-                    table_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_LINEAGE_TABLES"]
-                )
-            if self._client_options._use_lineage_processes:
-                table_description_prompt = (
-                    table_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_LINEAGE_PROCESSES"]
-                )
-            if self._client_options._use_ext_documents:
-                table_description_prompt = (
-                    table_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_DOCUMENT"]
-                )
-            if self._client_options._use_human_comments:
-                table_description_prompt = (
-                    table_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_HUMAN_COMMENTS"]
-                )
-            # Generation base
-            table_description_prompt = (
-                table_description_prompt
-                + constants["PROMPTS"]["TABLE_DESCRIPTION_GENERATION_BASE"]
-            )
-            # Generation with additional information
-            if (
-                self._client_options._use_lineage_tables
-                or self._client_options._use_lineage_processes
-            ):
-                table_description_prompt = (
-                    table_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_GENERATION_LINEAGE"]
-                )
-            # Output format
-            table_description_prompt = (
-                table_description_prompt + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
-            )
-            return table_description_prompt
-        except Exception as e:
-            logger.error(f"Exception: {e}.")
-            raise e
-
-    def _get_prompt_columns(self):
-        try:
-            # System
-            column_description_prompt = constants["PROMPTS"]["SYSTEM_PROMPT"]
-            # Base
-            if self._client_options._top_values_in_description==True:
-                column_description_prompt = (
-                    column_description_prompt
-                    + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_BASE_WITH_EXAMPLES"]
-                )
-            else:
-                column_description_prompt = (
-                    column_description_prompt
-                    + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_BASE"]
-                )
-                
-            # Additional metadata information
-            if self._client_options._use_profile:
-                column_description_prompt = (
-                    column_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_PROFILE"]
-                )
-            if self._client_options._use_data_quality:
-                column_description_prompt = (
-                    column_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_QUALITY"]
-                )
-            if self._client_options._use_lineage_tables:
-                column_description_prompt = (
-                    column_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_LINEAGE_TABLES"]
-                )
-            if self._client_options._use_lineage_processes:
-                column_description_prompt = (
-                    column_description_prompt
-                    + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_LINEAGE_PROCESSES"]
-                )
-            if self._client_options._use_human_comments:
-                column_description_prompt = (
-                    column_description_prompt
-                    + constants["PROMPTS"]["COLUMN_DESCRIPTION_PROMPT_HUMAN_COMMENTS"]
-                )
-            # Output format
-            column_description_prompt = (
-                column_description_prompt + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
-            )
-            return column_description_prompt
-        except Exception as e:
-            logger.error(f"Exception: {e}.")
-            raise e
-
-
-class ClientOptions:
-    """Represents the client options for the metadata wizard client."""
-
-    def __init__(
-        self,
-        use_lineage_tables=False,
-        use_lineage_processes=False,
-        use_profile=False,
-        use_data_quality=False,
-        use_ext_documents=False,
-        persist_to_dataplex_catalog=True,
-        stage_for_review=False,
-        add_ai_warning=True,
-        use_human_comments=False,
-        regenerate=False,
-        top_values_in_description=True,
-        description_handling=constants["DESCRIPTION_HANDLING"]["APPEND"],
-        description_prefix=constants["OUTPUT_CLAUSES"]["AI_WARNING"]
-    ):
-        self._use_lineage_tables = use_lineage_tables
-        self._use_lineage_processes = use_lineage_processes
-        self._use_profile = use_profile
-        self._use_data_quality = use_data_quality
-        self._use_ext_documents = use_ext_documents
-        self._persist_to_dataplex_catalog = persist_to_dataplex_catalog
-        self._stage_for_review = stage_for_review
-        self._add_ai_warning = add_ai_warning
-        self._use_human_comments = use_human_comments
-        self._regenerate = regenerate
-        self._top_values_in_description = top_values_in_description
-        self._description_handling = description_handling
-        self._description_prefix = description_prefix
+# Insert new import statements for prompt management and client options
+from .prompt_manager import PromtType, PromptManager
+from .client_options import ClientOptions
 
 class Client:
     """Represents the main metadata wizard client."""
@@ -1796,102 +1627,104 @@ class Client:
             return []
 
     def add_comment_to_table_draft_description(self, table_fqn, comment):
-        """Add a comment to a table's draft description.
-
-        Args:
-            table_fqn (str): The fully qualified name of the table
-            comment (str): The comment to add
-
-        Returns:
-            bool: True if the comment was added successfully, False otherwise
-        """
+        """Add a comment to the table's draft description aspect."""
         try:
-            logger.info(f"=== START: add_comment_to_table_draft_description for {table_fqn} ===")
-            logger.info(f"Comment to add: {comment}")
-            
             # Create a client
             client = self._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
-            logger.info("Created Dataplex catalog client")
             
             # Get project and dataset IDs
             project_id, dataset_id, table_id = self._split_table_fqn(table_fqn)
-            logger.info(f"Split table FQN - project: {project_id}, dataset: {dataset_id}, table: {table_id}")
-            
-            # Get the dataset location
-            dataset_location = self._get_dataset_location(table_fqn)
-            logger.info(f"Dataset location: {dataset_location}")
             
             # Set up aspect type and entry name
-            entry_name = f"projects/{project_id}/locations/{dataset_location}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
-            logger.info(f"Looking up entry: {entry_name}")
+            aspect_type = f"""projects/{self._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""
+            aspect_name = f"""{self._project_id}.global.{constants["ASPECT_TEMPLATE"]["name"]}"""
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
             
-            aspect_type = f"projects/{self._project_id}/locations/global/aspectTypes/metadata-ai-generated"
-            logger.info(f"Using aspect type: {aspect_type}")
+            # Create new aspect
+            new_aspect = dataplex_v1.Aspect()
+            new_aspect.aspect_type = aspect_type
             
-            aspect_name = f"{self._project_id}.global.metadata-ai-generated"
-            logger.info(f"Using aspect name: {aspect_name}")
+            # Get existing entry with aspects
+            try:
+                request = dataplex_v1.GetEntryRequest(
+                    name=entry_name,
+                    view=dataplex_v1.EntryView.CUSTOM,
+                    aspect_types=[aspect_type]
+                )
+                entry = client.get_entry(request=request)
+                
+                # Look for existing aspect
+                aspect_found = False
+                for i in entry.aspects:
+                    if i.endswith(f"""global.{constants["ASPECT_TEMPLATE"]["name"]}""") and entry.aspects[i].path == "":
+                        aspect_found = True
+                        new_aspect.data = entry.aspects[i].data
+                        existing_comments = list(new_aspect.data.get("human-comments", []))
+                        new_comment = comment
+                        existing_comments.append(new_comment)
+                        new_aspect.data["human-comments"] = existing_comments
+                        break
+                
+                if not aspect_found:
+                    # Create new aspect data if none exists
+                    aspect_data = {
+                        "certified": "false",
+                        "user-who-certified": "",
+                        "contents": "",
+                        "generation-date": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "to-be-regenerated": "false",
+                        "human-comments": [{
+                            "id": str(uuid.uuid4()),
+                            "text": comment,
+                            "type": "human",
+                            "timestamp": datetime.datetime.now().isoformat()
+                        }],
+                        "negative-examples": []
+                    }
+                    data_struct = struct_pb2.Struct()
+                    data_struct.update(aspect_data)
+                    new_aspect.data = data_struct
+                
+            except google.api_core.exceptions.NotFound:
+                # Create new aspect data if entry doesn't exist
+                aspect_data = {
+                    "certified": "false",
+                    "user-who-certified": "",
+                    "contents": "",
+                    "generation-date": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "to-be-regenerated": "false",
+                    "human-comments": [{
+                        "id": str(uuid.uuid4()),
+                        "text": comment,
+                        "type": "human",
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }],
+                    "negative-examples": []
+                }
+                data_struct = struct_pb2.Struct()
+                data_struct.update(aspect_data)
+                new_aspect.data = data_struct
             
-            # Get the entry
-            request = dataplex_v1.GetEntryRequest(name=entry_name)
-            logger.info("Sending GetEntryRequest...")
-            entry = client.get_entry(request=request)
+            # Create new entry with updated aspect
+            new_entry = dataplex_v1.Entry()
+            new_entry.name = entry_name
+            new_entry.aspects[aspect_name] = new_aspect
             
-            # Get existing aspects
-            aspects = entry.aspects
-            logger.info(f"Got entry response with {len(aspects)} aspects")
-            logger.info(f"Available aspects: {list(aspects.keys())}")
-            
-            # Create new aspect if none exists
-            if aspect_name not in aspects:
-                logger.info("Created new aspect")
-                new_aspect = dataplex_v1.Aspect()
-                new_aspect.data = {}
-            else:
-                logger.info("Found matching aspect")
-                new_aspect = aspects[aspect_name]
-            
-            # Convert aspect data to dict if it's not already
-            aspect_data = dict(new_aspect.data)
-            
-            # Initialize or get existing comments
-            if 'human-comments' not in aspect_data:
-                aspect_data['human-comments'] = []
-            elif not isinstance(aspect_data['human-comments'], list):
-                aspect_data['human-comments'] = []
-            
-            # Create new comment
-            new_comment = {
-                'id': str(uuid.uuid4()),
-                'text': comment,
-                'type': 'human',
-                'timestamp': datetime.datetime.now().isoformat()
-            }
-            
-            # Add new comment to list
-            aspect_data['human-comments'].append(new_comment)
-            
-            # Update aspect with new data
-            new_aspect.data.update(aspect_data)
-            
-            # Update entry with new aspect
-            entry.aspects[aspect_name] = new_aspect
-            
-            # Update the entry in Dataplex
-            update_request = dataplex_v1.UpdateEntryRequest(
-                entry=entry,
-                update_mask={"paths": ["aspects"]}
+            # Update the entry
+            request = dataplex_v1.UpdateEntryRequest(
+                entry=new_entry,
+                update_mask=field_mask_pb2.FieldMask(paths=["aspects"]),
+                allow_missing=False,
+                aspect_keys=[aspect_name]
             )
-            client.update_entry(request=update_request)
             
-            logger.info("Successfully added comment")
+            response = client.update_entry(request=request)
             return True
             
         except Exception as e:
-            logger.error(f"Error adding comment to table {table_fqn}: {str(e)}")
+            logger.error(f"Error updating comments: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
-        finally:
-            logger.info("=== END: add_comment_to_table_draft_description ===")
 
     def add_comment_to_column_draft_description(self, table_fqn, column_name, comment):
         """Add a comment to a column's draft description.
