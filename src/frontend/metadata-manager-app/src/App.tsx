@@ -30,7 +30,7 @@ export interface DatplexConfig {
   description_prefix: string;
 
   // Table Settings
-  dataset_id: string;
+  dataset_id?: string;
   table_id: string;
   documentation_uri: string;
 
@@ -149,7 +149,7 @@ function App() {
               <CssBaseline />
               <TopNavBar tasks={tasks} />
               <LeftMenu />
-              <Box component="main" sx={{ flexGrow: 1, p: 3, mt: 8, width: { sm: `calc(100% - ${240}px)` }, ml: { sm: `${240}px` } }}>
+              <Box component="main" sx={{ flexGrow: 1, p: 3, mt: 8 }}>
                 <Routes>
                   <Route 
                     path="/" 

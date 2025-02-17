@@ -1,3 +1,4 @@
+#!/bin/bash
 # Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,6 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Clean up old files
+rm -rf dist/*
+rm -rf *.egg-info
+
+# Build new package
 python3 -m build
-pip3 install dist/dataplexutils_metadata_wizard-0.0.1.tar.gz
-cp dist/dataplexutils_metadata_wizard-0.0.1.tar.gz ../backend_apis/
+
+# Install locally
+pip3 install dist/dataplexutils_metadata_wizard-0.0.2.tar.gz
+
+# Copy to backend
+cp dist/dataplexutils_metadata_wizard-0.0.2.tar.gz ../backend_apis/

@@ -9,12 +9,7 @@ interface MetadataItem {
   isHtml: boolean;
   status: 'draft' | 'accepted' | 'rejected';
   lastModified: string;
-  comments: Array<{
-    id: string;
-    text: string;
-    type: 'human' | 'negative';
-    timestamp: string;
-  }>;
+  comments: string[];
   'to-be-regenerated'?: boolean;
   isMarkingForRegeneration?: boolean;
   generationDate?: string;
@@ -32,15 +27,12 @@ interface ReviewState {
 }
 
 type ReviewAction =
-  | { type: 'SET_ITEMS'; payload: MetadataItem[] }
+  | { type: 'SET_ITEMS'; payload: { items: MetadataItem[]; pageToken: string | null; totalCount: number } }
+  | { type: 'APPEND_ITEMS'; payload: MetadataItem[] }
   | { type: 'UPDATE_ITEM'; payload: { id: string; updates: Partial<MetadataItem> } }
-  | { type: 'DELETE_ITEM'; payload: string }
-  | { type: 'SET_PAGE_TOKEN'; payload: string | null }
-  | { type: 'SET_TOTAL_COUNT'; payload: number }
   | { type: 'SET_CURRENT_INDEX'; payload: number }
   | { type: 'SET_VIEW_MODE'; payload: 'list' | 'review' }
-  | { type: 'SET_HAS_LOADED'; payload: boolean }
-  | { type: 'APPEND_ITEMS'; payload: MetadataItem[] };
+  | { type: 'SET_HAS_LOADED'; payload: boolean };
 
 const initialState: ReviewState = {
   items: [],
@@ -51,10 +43,20 @@ const initialState: ReviewState = {
   hasLoadedItems: false,
 };
 
-function reviewReducer(state: ReviewState, action: ReviewAction): ReviewState {
+const reviewReducer = (state: ReviewState, action: ReviewAction): ReviewState => {
   switch (action.type) {
     case 'SET_ITEMS':
-      return { ...state, items: action.payload };
+      return {
+        ...state,
+        items: action.payload.items,
+        pageToken: action.payload.pageToken,
+        totalCount: action.payload.totalCount,
+      };
+    case 'APPEND_ITEMS':
+      return {
+        ...state,
+        items: [...state.items, ...action.payload],
+      };
     case 'UPDATE_ITEM':
       return {
         ...state,
@@ -64,34 +66,30 @@ function reviewReducer(state: ReviewState, action: ReviewAction): ReviewState {
             : item
         ),
       };
-    case 'DELETE_ITEM':
+    case 'SET_CURRENT_INDEX':
       return {
         ...state,
-        items: state.items.filter(item => item.id !== action.payload),
+        currentItemIndex: action.payload,
       };
-    case 'SET_PAGE_TOKEN':
-      return { ...state, pageToken: action.payload };
-    case 'SET_TOTAL_COUNT':
-      return { ...state, totalCount: action.payload };
-    case 'SET_CURRENT_INDEX':
-      return { ...state, currentItemIndex: action.payload };
     case 'SET_VIEW_MODE':
-      return { ...state, viewMode: action.payload };
+      return {
+        ...state,
+        viewMode: action.payload,
+      };
     case 'SET_HAS_LOADED':
-      return { ...state, hasLoadedItems: action.payload };
-    case 'APPEND_ITEMS':
-      return { ...state, items: [...state.items, ...action.payload] };
+      return {
+        ...state,
+        hasLoadedItems: action.payload,
+      };
     default:
       return state;
   }
-}
+};
 
-interface ReviewContextType {
+const ReviewContext = createContext<{
   state: ReviewState;
   dispatch: React.Dispatch<ReviewAction>;
-}
-
-const ReviewContext = createContext<ReviewContextType | undefined>(undefined);
+} | undefined>(undefined);
 
 export const ReviewProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(reviewReducer, initialState);
@@ -109,4 +107,6 @@ export const useReview = () => {
     throw new Error('useReview must be used within a ReviewProvider');
   }
   return context;
-}; 
+};
+
+export type { MetadataItem, ReviewState, ReviewAction }; 

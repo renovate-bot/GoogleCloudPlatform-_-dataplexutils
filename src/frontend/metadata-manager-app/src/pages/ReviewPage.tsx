@@ -33,7 +33,6 @@ import {
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import EditIcon from '@mui/icons-material/Edit';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import DeleteIcon from '@mui/icons-material/Delete';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import ViewListIcon from '@mui/icons-material/ViewList';
@@ -47,31 +46,11 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import { DatplexConfig } from '../App';
 import { useCache } from '../contexts/CacheContext';
-import { useReview } from '../contexts/ReviewContext';
+import { useReview, MetadataItem } from '../contexts/ReviewContext';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
 
 interface Comment {
-  id: string;
   text: string;
-  type: 'human' | 'negative';
-  timestamp: string;
-}
-
-interface MetadataItem {
-  id: string;
-  type: 'table' | 'column';
-  name: string;
-  currentDescription: string;
-  draftDescription: string;
-  isHtml: boolean;
-  status: 'draft' | 'accepted' | 'rejected';
-  lastModified: string;
-  comments: Comment[];
-  'to-be-regenerated'?: boolean;
-  isMarkingForRegeneration?: boolean;
-  generationDate?: string;
-  whenAccepted?: string;
-  externalDocumentUri?: string;
 }
 
 interface EditorChangeHandler {
@@ -85,7 +64,7 @@ interface ReviewPageProps {
 const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   const { detailsCache, setDetailsCache, clearCache } = useCache();
   const { state, dispatch } = useReview();
-  const { items, pageToken, totalCount, currentItemIndex, viewMode, hasLoadedItems } = state;
+  const { items = [], pageToken, totalCount, currentItemIndex, viewMode, hasLoadedItems } = state;
 
   const [editItem, setEditItem] = useState<MetadataItem | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -100,6 +79,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   const [showDiff, setShowDiff] = useState(true);
   const editorRef = useRef<any>(null);
   const [isAccepting, setIsAccepting] = useState<{ [key: string]: boolean }>({});
+  const [isLoading, setIsLoading] = useState(false);
 
   // Initialize API URL
   useEffect(() => {
@@ -128,8 +108,11 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   // Load items if not loaded
   useEffect(() => {
     if (apiUrlBase && config.project_id && !hasLoadedItems) {
-      fetchReviewItems();
-      dispatch({ type: 'SET_HAS_LOADED', payload: true });
+      setIsLoading(true);
+      fetchReviewItems().finally(() => {
+        setIsLoading(false);
+        dispatch({ type: 'SET_HAS_LOADED', payload: true });
+      });
     }
   }, [apiUrlBase, config.project_id, hasLoadedItems]);
 
@@ -290,11 +273,11 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       try {
         setError(null);
         
-        // Extract table FQN from the item ID
         const tableFqn = editItem.id.split('#')[0];
         const [projectId, datasetId, tableId] = tableFqn.split('.');
+        const isColumn = editItem.id.includes('#column.');
+        const columnName = isColumn ? editItem.id.split('#column.')[1] : undefined;
         
-        // Save changes to backend
         await axios.post(`${apiUrlBase}/update_table_draft_description`, {
           client_settings: {
             project_id: config.project_id,
@@ -305,16 +288,12 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
             project_id: projectId,
             dataset_id: datasetId,
             table_id: tableId,
+            documentation_uri: editItem.externalDocumentUri || ""
           },
           description: editItem.draftDescription,
-          is_html: editItem.isHtml
-        }, {
-          headers: {
-            'Content-Type': 'application/json'
-          }
+          is_html: isRichText
         });
-
-        // Update the item in the UI
+        
         dispatch({
           type: 'UPDATE_ITEM',
           payload: { 
@@ -328,6 +307,9 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
         
         setEditDialogOpen(false);
         setEditItem(null);
+
+        // Refresh the item details to get the updated state
+        await loadItemDetails(editItem.id, true);
       } catch (err) {
         setError('Failed to save changes. Please try again.');
         console.error('Error saving description:', err);
@@ -335,66 +317,46 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     }
   };
 
-  const handleDelete = (id: string) => {
-    dispatch({ type: 'DELETE_ITEM', payload: id });
-  };
-
   const handleAddComment = async (itemId: string) => {
-    if (newComment.trim()) {
-      try {
-        setError(null);
-        const item = items.find(i => i.id === itemId);
-        if (!item) return;
+    try {
+      setError(null);
+      const item = items.find(i => i.id === itemId);
+      if (!item) return;
 
-        // Parse the item ID to get table_fqn and column_name
-        const [tableFqn, type, columnName] = itemId.split('#');
-        const [projectId, datasetId, tableId] = tableFqn.split('.');
+      const tableFqn = item.id.split('#')[0];
+      const [projectId, datasetId, tableId] = tableFqn.split('.');
+      const isColumn = item.id.includes('#column.');
+      const columnName = isColumn ? item.id.split('#column.')[1] : undefined;
 
-        // Make API call to save the comment
-        const response = await axios.post(`${apiUrlBase}/metadata/review/add_comment`, {
-          client_settings: {
-            project_id: config.project_id,
-            llm_location: config.llm_location,
-            dataplex_location: config.dataplex_location,
-          },
-          table_settings: {
-            project_id: projectId,
-            dataset_id: datasetId,
-            table_id: tableId,
-          },
-          comment: newComment,
-          column_name: type === 'column' ? columnName : undefined
-        });
+      await axios.post(`${apiUrlBase}/metadata/review/add_comment`, {
+        client_settings: {
+          project_id: config.project_id,
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
+        },
+        table_settings: {
+          project_id: projectId,
+          dataset_id: datasetId,
+          table_id: tableId,
+        },
+        comment: newComment,
+        column_name: columnName
+      });
 
-        if (response.data) {
-          // Create new comment object with the response data
-          const newCommentObj = {
-            id: response.data.id || Date.now().toString(),
-            text: newComment,
-            type: commentType,
-            timestamp: response.data.timestamp || new Date().toISOString(),
-          };
-
-          const currentComments = Array.isArray(item.comments) ? item.comments : [];
-          
-          // Update UI state
-          dispatch({
-            type: 'UPDATE_ITEM',
-            payload: {
-              id: itemId,
-              updates: {
-                comments: [...currentComments, newCommentObj]
-              }
-            }
-          });
-
-          // Clear the comment input
-          setNewComment('');
+      const updatedComments = [...(item.comments || []), newComment];
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: { 
+          id: itemId, 
+          updates: { comments: updatedComments } 
         }
-      } catch (error: any) {
-        console.error('Error adding comment:', error);
-        setError(error.response?.data?.detail || error.message || 'Failed to add comment');
-      }
+      });
+
+      setNewComment('');
+
+    } catch (error: any) {
+      console.error('Error adding comment:', error);
+      setError(error.response?.data?.detail || 'Failed to add comment');
     }
   };
 
@@ -628,6 +590,19 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     );
   };
 
+  const renderComments = (comments: string[]) => (
+    <List>
+      {comments.map((comment, index) => (
+        <React.Fragment key={index}>
+          <ListItem>
+            <ListItemText primary={comment} />
+          </ListItem>
+          {index < comments.length - 1 && <Divider />}
+        </React.Fragment>
+      ))}
+    </List>
+  );
+
   const renderListMode = () => (
     <Box>
       <Paper>
@@ -710,12 +685,6 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
                       onClick={() => handleEdit(item)}
                     >
                       <EditIcon />
-                    </IconButton>
-                    <IconButton
-                      color="error"
-                      onClick={() => handleDelete(item.id)}
-                    >
-                      <DeleteIcon />
                     </IconButton>
                   </TableCell>
                 </TableRow>
@@ -819,177 +788,179 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     const currentItem = items[currentItemIndex];
     if (!currentItem) return null;
 
-    // Add debugging logs
-    console.log('=== Comments Debug ===');
-    console.log('Current Item:', currentItem);
-    console.log('Comments:', currentItem.comments);
-    console.log('Is Array:', Array.isArray(currentItem.comments));
-    console.log('Comments Length:', currentItem.comments?.length);
-    console.log('=== End Comments Debug ===');
+    console.log('Rendering review mode for item:', currentItem);
+
+    // Add loading indicator while details are being fetched
+    if (isLoadingDetails) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
 
     return (
       <Box>
-        <Grid container spacing={2}>
-          <Grid item xs={12}>
-            {renderActionBar(currentItem)}
-          </Grid>
+        {/* Top Sticky Action Bar */}
+        <Box sx={{ 
+          p: 2, 
+          mb: 2,
+          position: 'sticky',
+          top: 64, // Height of the top navigation bar
+          zIndex: 1,
+          backgroundColor: 'background.paper',
+          borderBottom: 1,
+          borderColor: 'divider'
+        }}>
+          {renderActionBar(currentItem)}
+        </Box>
 
-          {isLoadingDetails ? (
-            <Grid item xs={12}>
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
-                <CircularProgress />
-                <Typography variant="h6" sx={{ ml: 2 }}>
-                  Loading item details...
+        {/* Main Content */}
+        <Box sx={{ pb: 8 }}> {/* Add padding at bottom to prevent content from being hidden behind bottom bar */}
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <Box>
+              <Typography variant="h5" gutterBottom>
+                {currentItem.name}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Chip
+                  label={currentItem.type.charAt(0).toUpperCase() + currentItem.type.slice(1)}
+                  size="small"
+                  color={currentItem.type === 'table' ? 'primary' : 'secondary'}
+                />
+                <Chip
+                  label={currentItem.status.charAt(0).toUpperCase() + currentItem.status.slice(1)}
+                  size="small"
+                  color={getStatusColor(currentItem.status)}
+                />
+                <Typography variant="body2" color="text.secondary">
+                  Last modified: {new Date(currentItem.lastModified).toLocaleString()}
                 </Typography>
               </Box>
+            </Box>
+          </Paper>
+
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <Box sx={{ mb: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={showDiff}
+                        onChange={(e) => setShowDiff(e.target.checked)}
+                      />
+                    }
+                    label={showDiff ? "Showing Diff View" : "Showing Both Versions"}
+                  />
+                </Box>
+              </Box>
             </Grid>
-          ) : (
-            <>
+
+            {showDiff ? (
               <Grid item xs={12}>
                 <Card>
                   <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      {currentItem.name}
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                      <Chip
-                        label={currentItem.type.charAt(0).toUpperCase() + currentItem.type.slice(1)}
-                        size="small"
-                        color={currentItem.type === 'table' ? 'primary' : 'secondary'}
+                    <Box sx={{ 
+                      minHeight: '400px',
+                      '& .diff-viewer': {
+                        width: '100%',
+                        minHeight: '400px'
+                      },
+                      '& .diff-container': {
+                        margin: 0,
+                        padding: '16px'
+                      },
+                      '& .diff-title-header': {
+                        padding: '8px 16px',
+                        background: '#f5f5f5',
+                      }
+                    }}>
+                      <ReactDiffViewer
+                        oldValue={currentItem.currentDescription}
+                        newValue={currentItem.draftDescription}
+                        splitView={true}
+                        leftTitle="Current Version"
+                        rightTitle="Draft Version"
+                        compareMethod={DiffMethod.WORDS}
                       />
-                      <Chip
-                        label={currentItem.status.charAt(0).toUpperCase() + currentItem.status.slice(1)}
-                        size="small"
-                        color={getStatusColor(currentItem.status)}
-                      />
-                      {currentItem['to-be-regenerated'] && (
-                        <Chip
-                          label="To be regenerated"
-                          size="small"
-                          color="warning"
-                          icon={<AutorenewIcon />}
-                        />
-                      )}
                     </Box>
-                    {currentItem.generationDate && (
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        Generated: {new Date(currentItem.generationDate).toLocaleString()}
-                      </Typography>
-                    )}
-                    {currentItem.whenAccepted && (
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        Accepted: {new Date(currentItem.whenAccepted).toLocaleString()}
-                      </Typography>
-                    )}
-                    {currentItem.externalDocumentUri && (
-                      <Button
-                        variant="outlined"
-                        href={currentItem.externalDocumentUri}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        startIcon={<LaunchIcon />}
-                        sx={{ mt: 1 }}
-                      >
-                        View External Document
-                      </Button>
-                    )}
                   </CardContent>
                 </Card>
               </Grid>
+            ) : (
+              <>
+                <Grid item xs={12} md={6}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        Current Description
+                      </Typography>
+                      {renderDescription(currentItem.currentDescription, currentItem.isHtml)}
+                    </CardContent>
+                  </Card>
+                </Grid>
 
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    {renderDescriptionWithDiff(
-                      currentItem.currentDescription,
-                      currentItem.draftDescription,
-                      currentItem.isHtml
-                    )}
-                  </CardContent>
-                </Card>
-              </Grid>
+                <Grid item xs={12} md={6}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        Draft Description
+                      </Typography>
+                      {renderDescription(currentItem.draftDescription, currentItem.isHtml)}
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </>
+            )}
 
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      Comments
-                    </Typography>
-                    {/* Add debug info in UI */}
-                    <Typography variant="body2" color="text.secondary" gutterBottom>
-                      Debug: {Array.isArray(currentItem.comments) ? `${currentItem.comments.length} comments` : 'Comments not an array'}
-                    </Typography>
-                    <List>
-                      {Array.isArray(currentItem.comments) && currentItem.comments.length > 0 ? (
-                        currentItem.comments.map((comment) => (
-                          <React.Fragment key={comment.id}>
-                            <ListItem>
-                              <ListItemText
-                                primary={<Box dangerouslySetInnerHTML={{ __html: comment.text }} />}
-                                secondary={
-                                  <Typography variant="body2" color="text.secondary">
-                                    Type: {comment.type} - Time: {new Date(comment.timestamp).toLocaleString()}
-                                  </Typography>
-                                }
-                              />
-                            </ListItem>
-                            <Divider />
-                          </React.Fragment>
-                        ))
-                      ) : (
-                        <ListItem>
-                          <ListItemText 
-                            primary="No comments available"
-                            secondary={`Comments data: ${JSON.stringify(currentItem.comments)}`}
-                          />
-                        </ListItem>
-                      )}
-                    </List>
-                    <Box sx={{ mt: 2 }}>
-                      <TextField
-                        fullWidth
-                        multiline
-                        rows={2}
-                        value={newComment}
-                        onChange={(e) => setNewComment(e.target.value)}
-                        placeholder="Add a comment..."
-                        sx={{ mb: 1 }}
-                      />
-                      <ToggleButtonGroup
-                        value={commentType}
-                        exclusive
-                        onChange={(e, value) => value && setCommentType(value)}
-                        size="small"
-                        sx={{ mb: 1 }}
-                      >
-                        <ToggleButton value="human">Human</ToggleButton>
-                        <ToggleButton value="negative">Negative</ToggleButton>
-                      </ToggleButtonGroup>
+            <Grid item xs={12}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    Comments
+                  </Typography>
+                  {renderComments(currentItem.comments)}
+                  <Box sx={{ mt: 2 }}>
+                    <TextField
+                      fullWidth
+                      multiline
+                      rows={3}
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder="Add a comment..."
+                    />
+                    <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
                       <Button
                         variant="contained"
                         onClick={() => handleAddComment(currentItem.id)}
                         disabled={!newComment.trim()}
-                        fullWidth
                       >
                         Add Comment
                       </Button>
                     </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </>
-          )}
-
-          <Grid item xs={12}>
-            {renderActionBar(currentItem)}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
           </Grid>
-        </Grid>
-        {isLoadingNext && (
-          <Box sx={{ position: 'fixed', bottom: 16, right: 16, display: 'flex', alignItems: 'center', bgcolor: 'background.paper', p: 1, borderRadius: 1, boxShadow: 1 }}>
-            <CircularProgress size={20} sx={{ mr: 1 }} />
-            <Typography variant="body2">Loading next item...</Typography>
-          </Box>
-        )}
+        </Box>
+
+        {/* Bottom Sticky Action Bar */}
+        <Box sx={{ 
+          p: 2,
+          position: 'fixed',
+          bottom: 0,
+          left: 240, // Width of the left menu
+          right: 0,
+          zIndex: 1,
+          backgroundColor: 'background.paper',
+          borderTop: 1,
+          borderColor: 'divider',
+          boxShadow: '0px -2px 4px rgba(0, 0, 0, 0.05)'
+        }}>
+          {renderActionBar(currentItem)}
+        </Box>
       </Box>
     );
   };
@@ -1004,17 +975,10 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
 
   const fetchReviewItems = async (nextPageToken?: string) => {
     try {
-      setIsRefreshing(true);
       setError(null);
-
-      if (!config.project_id) {
-        setError('Project ID is not configured. Please set it in the Configuration page.');
-        return;
-      }
-
-      // Clear cache when refreshing
-      clearCache();
-
+      setIsLoading(true);
+      console.log('Fetching review items...');
+      
       const response = await axios.post(`${apiUrlBase}/metadata/review`, {
         client_settings: {
           project_id: config.project_id,
@@ -1023,150 +987,113 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
         },
         dataset_settings: {
           project_id: config.project_id,
-          dataset_id: config.dataset_id || "metadata_generation",
-          documentation_csv_uri: config.documentation_csv_uri || "",
-          strategy: config.strategy || "NAIVE"
-        },
-        page_token: nextPageToken
+          dataset_id: config.dataset_id || "",
+          documentation_csv_uri: "",
+          strategy: "NAIVE"
+        }
       });
 
-      if (!response.data?.data) {
-        dispatch({ type: 'SET_ITEMS', payload: [] });
-        dispatch({ type: 'SET_TOTAL_COUNT', payload: 0 });
-        dispatch({ type: 'SET_PAGE_TOKEN', payload: null });
-        return;
-      }
+      console.log('Received response:', response.data);
 
-      const { items: responseItems, nextPageToken: newPageToken, totalCount: newTotalCount } = response.data.data;
-
-      // Transform the API response into MetadataItem format
-      const reviewItems: MetadataItem[] = (responseItems || []).map((item: any) => {
-        // Ensure comments is an array
-        const comments = Array.isArray(item.comments) ? item.comments : [];
-        
-        return {
-          id: item.id || String(Math.random()),
-          type: item.type || 'table',
-          name: item.name || '',
-          currentDescription: item.currentDescription || '',
-          draftDescription: item.draftDescription || '',
-          isHtml: true, // Always treat descriptions as HTML
-          status: item.status || 'draft',
-          lastModified: item.lastModified || new Date().toISOString(),
-          comments: comments,
-          'to-be-regenerated': item.markedForRegeneration || false
-        };
-      });
-
-      if (nextPageToken) {
-        dispatch({ type: 'APPEND_ITEMS', payload: reviewItems });
-      } else {
-        dispatch({ type: 'SET_ITEMS', payload: reviewItems });
-      }
+      // Ensure we have a properly structured response
+      const { items: newItems = [], nextPageToken: newPageToken = null, totalCount: newTotalCount = 0 } = response.data;
       
-      dispatch({ type: 'SET_PAGE_TOKEN', payload: newPageToken });
-      dispatch({ type: 'SET_TOTAL_COUNT', payload: newTotalCount });
+      console.log(`Processing ${newItems.length} items with totalCount: ${newTotalCount}`);
+
+      dispatch({
+        type: 'SET_ITEMS',
+        payload: {
+          items: newItems,
+          pageToken: newPageToken,
+          totalCount: newTotalCount
+        }
+      });
+
+      // If in review mode and we have items, load the first item's details
+      if (viewMode === 'review' && newItems.length > 0) {
+        await loadItemDetails(newItems[0].id);
+        if (newItems.length > 1) {
+          preloadNextItem(0);
+        }
+      }
+
     } catch (error: any) {
-      console.error('API Error:', error);
-      const errorMessage = error.response?.data?.detail || error.message || 'Failed to fetch review items';
-      setError(errorMessage);
+      console.error('Error fetching review items:', error);
+      setError(error.response?.data?.detail || 'Failed to fetch review items');
+      // Set empty items on error to prevent undefined errors
+      dispatch({
+        type: 'SET_ITEMS',
+        payload: {
+          items: [],
+          pageToken: null,
+          totalCount: 0
+        }
+      });
     } finally {
-      setIsRefreshing(false);
+      setIsLoading(false);
     }
   };
 
   const loadItemDetails = async (itemId: string, setLoading = true) => {
-    // If we're refreshing, don't use cache
-    if (detailsCache[itemId] && !isRefreshing) {
-      console.log('=== Loading from cache ===');
-      console.log('Cached item:', detailsCache[itemId]);
-      console.log('Cached comments:', detailsCache[itemId].comments);
-      dispatch({
-        type: 'UPDATE_ITEM',
-        payload: { id: itemId, updates: detailsCache[itemId] }
-      });
-      return;
-    }
-
     try {
       if (setLoading) {
         setIsLoadingDetails(true);
-        setError(null);
       }
-      
-      console.log('=== START: loadItemDetails ===');
-      console.log('ItemId:', itemId);
+      setError(null);
 
-      // Parse the item ID to get table_fqn and column_name
-      const [tableFqn, type, columnName] = itemId.split('#');
-      const [projectId, datasetId, tableId] = tableFqn.split('.');
+      // Check cache first
+      if (detailsCache[itemId]) {
+        console.log('Using cached item details:', detailsCache[itemId]);
+        return detailsCache[itemId];
+      }
 
-      const requestBody = {
+      const [projectId, datasetId, tableId] = itemId.split('#')[0].split('.');
+      const isColumn = itemId.includes('#column.');
+      const columnName = isColumn ? itemId.split('#column.')[1] : undefined;
+
+      console.log('Fetching details for item:', itemId);
+      const response = await axios.post(`${apiUrlBase}/metadata/review/details`, {
         client_settings: {
           project_id: config.project_id,
-          llm_location: config.llm_location || '',
-          dataplex_location: config.dataplex_location || ''
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
         },
         table_settings: {
           project_id: projectId,
           dataset_id: datasetId,
           table_id: tableId,
-          documentation_uri: ""
-        }
-      };
-
-      // Add column_name if this is a column item
-      if (type === 'column' && columnName) {
-        requestBody['column_name'] = columnName;
-      }
-      
-      const url = `${apiUrlBase}/metadata/review/details`;
-      console.log('Making API request to:', url);
-      console.log('Request body:', requestBody);
-      
-      const response = await axios.post(url, requestBody);
-      console.log('API Response:', response.data);
-
-      if (!response.data?.data) {
-        throw new Error('No data returned from API');
-      }
-
-      // Ensure comments is initialized as an array
-      const itemData = {
-        ...response.data.data,
-        comments: response.data.data.comments || [],
-        'to-be-regenerated': response.data.data.markedForRegeneration || response.data.data['to-be-regenerated'] || false
-      };
-      
-      console.log('Processed item data:', itemData);
-      console.log('Comments after processing:', itemData.comments);
-
-      // Update cache using the context's setDetailsCache
-      setDetailsCache({
-        ...detailsCache,
-        [itemId]: itemData
+        },
+        column_name: columnName
       });
 
+      // Response is no longer wrapped in a data field
+      const details = response.data;
+      console.log('Received item details:', details);
+
+      // Update the item in the state with the new details
       dispatch({
         type: 'UPDATE_ITEM',
-        payload: { id: itemId, updates: itemData }
+        payload: {
+          id: itemId,
+          updates: {
+            ...details,
+            lastModified: details.lastModified || new Date().toISOString()
+          }
+        }
       });
 
-      return itemData;
+      // Update cache
+      setDetailsCache({
+        ...detailsCache,
+        [itemId]: details
+      });
+
+      return details;
 
     } catch (error: any) {
-      console.error('=== ERROR in loadItemDetails ===');
-      console.error('Error message:', error.message);
-      let errorMessage = 'Failed to fetch item details';
-      if (error.response?.data?.detail) {
-        errorMessage = typeof error.response.data.detail === 'object' 
-          ? JSON.stringify(error.response.data.detail)
-          : error.response.data.detail;
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      setError(errorMessage);
-      throw error;
+      console.error('Error loading item details:', error);
+      setError(error.response?.data?.detail || 'Failed to load item details');
+      return null;
     } finally {
       if (setLoading) {
         setIsLoadingDetails(false);

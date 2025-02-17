@@ -17,8 +17,9 @@ limitations under the License.
 from fastapi import FastAPI, Body, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import dataplexutils.metadata.wizard as mw
-from dataplexutils.metadata.wizard import Client, ClientOptions
+from dataplexutils.metadata.client import Client
+from dataplexutils.metadata.client_options import ClientOptions
+from dataplexutils.metadata.version import __version__
 from pydantic import BaseModel
 import logging
 import datetime
@@ -60,7 +61,7 @@ class TableSettings(BaseModel):
 
 class DatasetSettings(BaseModel):
     project_id: str
-    dataset_id: str
+    dataset_id: str | None = None
     documentation_csv_uri: str
     strategy: str
 
@@ -106,7 +107,7 @@ app.add_middleware(
 
 @app.get("/version")
 def read_version():
-    return {"version": mw.__version__}
+    return {"version": __version__}
 
 
 @app.post("/generate_table_description")
@@ -355,7 +356,7 @@ def accept_table_draft_description(
         aspect_content = {
             "certified": "true",
             "user-who-certified": "system",  # You might want to pass the actual user from the frontend
-            "contents": client._get_table_draft_description(table_fqn),
+            "contents": client._review_ops.get_review_item_details(table_fqn)["draftDescription"],
             "generation-date": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
             "to-be-regenerated": "false",
             "human-comments": existing_comments,  # Preserve existing comments
@@ -366,7 +367,7 @@ def accept_table_draft_description(
         }
         
         # Update the aspect with the new metadata
-        success = client._update_table_draft_description(
+        success = client._dataplex_ops.update_table_draft_description(
             table_fqn=table_fqn,
             description=aspect_content["contents"],
             metadata=aspect_content
@@ -465,17 +466,18 @@ def get_regeneration_counts(
     dataset_settings: DatasetSettings = Body(),
 ):
     try:
-        client = mw.Client(
+        client = Client(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
         )
         
         dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
-        tables_count = client._list_tables_in_dataset_for_regeneration(dataset_fqn)
+        tables = client._review_ops.get_review_items_for_dataset(dataset_fqn) #TODO: remove "CC" before release and change to finding the aspect
+        tables_count = len(tables.get("data", {}).get("items", []))
         
         return RegenerationCounts(
-            tables=len(tables_count),
+            tables=tables_count,
             columns=0  # TODO: Implement column counting
         )
     except Exception as e:
@@ -492,11 +494,11 @@ def regenerate_selected(
     regeneration_request: RegenerationRequest = Body(),
 ):
     try:
-        client = mw.Client(
+        client = Client(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
-            client_options=mw.ClientOptions(**client_options_settings.dict())
+            client_options=ClientOptions(**client_options_settings.dict())
         )
         
         results = []
@@ -520,20 +522,20 @@ def regenerate_all(
     dataset_settings: DatasetSettings = Body(),
 ):
     try:
-        client = mw.Client(
+        client = Client(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
-            client_options=mw.ClientOptions(**client_options_settings.dict())
+            client_options=ClientOptions(**client_options_settings.dict())
         )
         
         dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
-        tables = client._list_tables_in_dataset_for_regeneration(dataset_fqn)
+        tables = client._review_ops.get_review_items_for_dataset(dataset_fqn)
         
         results = []
-        for table in tables:
+        for table in tables.get("data", {}).get("items", []):
             # TODO: Implement regeneration logic for all marked objects
-            results.append({"table": table, "status": "regenerated"})
+            results.append({"table": table["name"], "status": "regenerated"})
         
         return {"regenerated_objects": results}
     except Exception as e:
@@ -569,33 +571,57 @@ def get_review_items(
     dataset_settings: DatasetSettings = Body(),
 ):
     try:
-        client = mw.Client(
+        client = Client(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
         )
         
-        # Ensure both project_id and dataset_id are provided
-        if not dataset_settings.project_id or not dataset_settings.dataset_id:
+        # Only validate project_id
+        if not dataset_settings.project_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Both project_id and dataset_id must be provided"
+                detail="project_id must be provided"
             )
         
-        # Construct the dataset FQN in the correct format: project.dataset
-        dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
-        logger.info(f"Getting review items for dataset {dataset_fqn}")
-        
         try:
-            return client._get_review_items_for_dataset(dataset_fqn)
+            # Get all review items for the project, optionally filtered by dataset
+            search_query = "cc"  # Never remove hardcoded "cc"
+            if dataset_settings.dataset_id:
+                # If dataset_id is provided, use it as an additional filter
+                search_query = f"parent:@bigquery/projects/{dataset_settings.project_id}/datasets/{dataset_settings.dataset_id}"
+            
+            logger.info(f"Getting review items for project {dataset_settings.project_id}")
+            if search_query:
+                logger.info(f"Filtering by dataset: {search_query}")
+                
+            result = client._review_ops.get_review_items_for_dataset(search_query)
+            logger.info(f"Raw result from review_ops: {result}")
+            
+            # Ensure we always return a properly structured response
+            if not isinstance(result, dict):
+                result = {"items": [], "nextPageToken": None, "totalCount": 0}
+            
+            # If result has a "data" wrapper, unwrap it
+            if isinstance(result, dict) and "data" in result:
+                result = result["data"]
+            
+            # Ensure all required fields are present
+            response_data = {
+                "items": result.get("items", []),
+                "nextPageToken": result.get("nextPageToken", None),
+                "totalCount": result.get("totalCount", len(result.get("items", [])))
+            }
+            
+            logger.info(f"Structured response data: {response_data}")
+            return response_data
+            
         except Exception as e:
-            logger.error(f"Error getting review items for dataset {dataset_fqn}: {str(e)}")
+            logger.error(f"Error getting review items: {str(e)}")
             return {
-                "data": {
-                    "items": [],
-                    "nextPageToken": None,
-                    "totalCount": 0
-                }
+                "items": [],
+                "nextPageToken": None,
+                "totalCount": 0
             }
             
     except Exception as e:
@@ -611,7 +637,7 @@ def reject_review_item(
     client_settings: ClientSettings = Body(),
 ):
     try:
-        client = mw.Client(
+        client = Client(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
@@ -633,7 +659,7 @@ def edit_review_item(
     description: str = Body(..., embed=True),
 ):
     try:
-        client = mw.Client(
+        client = Client(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
@@ -655,7 +681,7 @@ def add_review_comment(
     comment: str = Body(..., embed=True),
 ):
     try:
-        client = mw.Client(
+        client = Client(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
@@ -690,7 +716,7 @@ def mark_for_regeneration(
     If only table_fqn is provided, marks the entire table for regeneration.
     """
     try:
-        client = mw.Client(
+        client = Client(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
@@ -760,8 +786,8 @@ def get_review_item_details(
         if not details:
             raise ValueError(f"No details found for {'column ' + column_name if column_name else 'table'} {table_fqn}")
         
-        # Wrap the response in a data field
-        return {"data": details}
+        # Return the details directly without wrapping in data field
+        return details
 
     except Exception as e:
         logger.error(f"Error getting review item details for table {table_fqn} column {column_name}: {str(e)}")
@@ -789,7 +815,7 @@ async def update_table_draft_description(request: Request, update_request: Updat
         logger.info(f"Raw request body: {body.decode()}")
         logger.info(f"Parsed request: {update_request.dict()}")
         
-        wizard = Client(
+        client = Client(
             project_id=update_request.client_settings.project_id,
             llm_location=update_request.client_settings.llm_location,
             dataplex_location=update_request.client_settings.dataplex_location
@@ -803,7 +829,7 @@ async def update_table_draft_description(request: Request, update_request: Updat
         logger.info(f"Updating draft description. Length: {len(update_request.description)}")
         logger.info(f"Is HTML: {update_request.is_html}")
         
-        success = wizard._update_table_draft_description(
+        success = client._dataplex_ops.update_table_draft_description(
             table_fqn=table_fqn,
             description=update_request.description
         )
@@ -850,7 +876,7 @@ def add_comment(request: AddCommentRequest):
         request: Contains client settings, table settings, and the comment to add
     
     Returns:
-        The newly added comment object
+        The newly added comment text
     """
     try:
         logger.info("=== START: add_comment ===")
@@ -862,14 +888,6 @@ def add_comment(request: AddCommentRequest):
         
         table_fqn = f"{request.table_settings.project_id}.{request.table_settings.dataset_id}.{request.table_settings.table_id}"
         logger.info(f"Adding comment to table: {table_fqn}")
-        
-        # Create new comment object
-        new_comment = {
-            "id": str(uuid.uuid4()),
-            "text": request.comment,
-            "type": "human",
-            "timestamp": datetime.datetime.now().isoformat()
-        }
         
         if request.column_name:
             success = client.add_comment_to_column_draft_description(table_fqn, request.column_name, request.comment)
@@ -884,8 +902,7 @@ def add_comment(request: AddCommentRequest):
             )
             
         logger.info("Comment added successfully")
-        logger.info(f"New comment: {new_comment}")
-        return new_comment
+        return {"comment": request.comment}
         
     except Exception as e:
         logger.error(f"Error adding comment: {str(e)}")
@@ -905,7 +922,7 @@ def add_negative_example(request: AddNegativeExampleRequest):
         request: Contains client settings, table settings, and the negative example to add
     
     Returns:
-        The newly added negative example object
+        The newly added negative example text
     """
     try:
         client = Client(
@@ -920,16 +937,8 @@ def add_negative_example(request: AddNegativeExampleRequest):
         existing_comments = client.get_comments_to_table_draft_description(table_fqn) or []
         existing_negative_examples = client.get_negative_examples_to_table_draft_description(table_fqn) or []
         
-        # Create new negative example
-        new_example = {
-            "id": str(uuid.uuid4()),
-            "text": request.example,
-            "type": "negative",
-            "timestamp": datetime.datetime.now().isoformat()
-        }
-        
         # Add to existing examples
-        existing_negative_examples.append(new_example)
+        existing_negative_examples.append(request.example)
         
         # Update aspect with new metadata
         aspect_content = {
@@ -937,9 +946,9 @@ def add_negative_example(request: AddNegativeExampleRequest):
             "human-comments": existing_comments
         }
         
-        success = client._update_table_draft_description(
+        success = client._dataplex_ops.update_table_draft_description(
             table_fqn=table_fqn,
-            description=client._get_table_draft_description(table_fqn),
+            description=client._review_ops.get_review_item_details(table_fqn)["draftDescription"],
             metadata=aspect_content
         )
         
@@ -949,7 +958,7 @@ def add_negative_example(request: AddNegativeExampleRequest):
                 detail="Failed to add negative example"
             )
             
-        return new_example
+        return {"example": request.example}
         
     except Exception as e:
         logger.error(f"Error adding negative example: {str(e)}")
