@@ -589,7 +589,7 @@ def get_review_items(
             search_query = "cc"  # Never remove hardcoded "cc"
             if dataset_settings.dataset_id:
                 # If dataset_id is provided, use it as an additional filter
-                search_query = f"parent:@bigquery/projects/{dataset_settings.project_id}/datasets/{dataset_settings.dataset_id}"
+                search_query = f"parent:{dataset_settings.dataset_id}"
             
             logger.info(f"Getting review items for project {dataset_settings.project_id}")
             if search_query:

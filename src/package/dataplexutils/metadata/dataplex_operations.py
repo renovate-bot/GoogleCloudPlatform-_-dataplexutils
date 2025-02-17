@@ -41,6 +41,73 @@ class DataplexOperations:
         """Initialize with reference to main client."""
         self._client = client
 
+    def _check_if_exists_aspect_type(self, aspect_type_id: str):
+        """Checks if a specified aspect type exists in Dataplex catalog.
+
+        Args:
+            aspect_type_id (str): The ID of the aspect type to check
+
+        Returns:
+            bool: True if the aspect type exists, False otherwise
+
+        Raises:
+            Exception: If there is an error checking the aspect type existence
+                beyond a NotFound error
+        """
+        # Create a client
+        client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+
+        # Initialize request argument(s)
+        request = dataplex_v1.GetAspectTypeRequest(
+            name=f"projects/{self._client._project_id}/locations/global/aspectTypes/{aspect_type_id}"
+        )
+        
+        # Make the request
+        try:
+            client.get_aspect_type(request=request)
+            return True
+        except google.api_core.exceptions.NotFound:
+            return False
+
+    def _create_aspect_type(self, aspect_type_id: str):
+        """Creates a new aspect type in Dataplex catalog.
+
+        Args:
+            aspect_type_id (str): The ID to use for the new aspect type
+
+        Raises:
+            Exception: If there is an error creating the aspect type
+        """
+        # Create a client
+        client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+
+        # Initialize request argument(s)
+        aspect_type = dataplex_v1.AspectType()
+        full_metadata_template = {
+            "type_": constants["ASPECT_TEMPLATE"]["type_"],
+            "name": constants["ASPECT_TEMPLATE"]["name"],
+            "record_fields": constants["record_fields"]
+        }
+        metadata_template = dataplex_v1.AspectType.MetadataTemplate(full_metadata_template)
+
+        logger.info("Will deploy following template:" + str(metadata_template))
+        
+        aspect_type.metadata_template = metadata_template
+        aspect_type.display_name = constants["ASPECT_TEMPLATE"]["display_name"]
+
+        request = dataplex_v1.CreateAspectTypeRequest(
+            parent=f"projects/{self._client._project_id}/locations/global",
+            aspect_type_id=aspect_type_id,
+            aspect_type=aspect_type,
+        )
+
+        # Make the request
+        try:
+            operation = client.create_aspect_type(request=request)
+        except Exception as e:
+            logger.error(f"Failed to create aspect type: {e}")
+            raise e
+
     def update_table_dataplex_description(self, table_fqn, description):
         """Updates the table description in Dataplex.
 
@@ -139,7 +206,6 @@ class DataplexOperations:
         """
         try:
             client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
-
             # Create new aspect content
             new_aspect_content = {
                 "certified": "false",
@@ -535,3 +601,151 @@ class DataplexOperations:
         else:
             logger.warning(f"No draft description found for column {column_name} in table {table_fqn}")
             return False 
+
+    def get_table_quality(self, use_data_quality, table_fqn):
+        """Gets the quality information for a table from Dataplex.
+
+        Args:
+            use_data_quality (bool): Whether to use data quality information
+            table_fqn (str): The fully qualified name of the table
+
+        Returns:
+            dict: Table quality information or None if not available/enabled
+        """
+        if not use_data_quality:
+            return None
+            
+        try:
+            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
+            
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+            aspect_type = "projects/dataplex-types/locations/global/aspectTypes/data_quality"
+            aspect_types = [aspect_type]
+
+            request = dataplex_v1.GetEntryRequest(
+                name=entry_name,
+                view=dataplex_v1.EntryView.CUSTOM,
+                aspect_types=aspect_types
+            )
+            
+            entry = client.get_entry(request=request)
+            for aspect_key, aspect in entry.aspects.items():
+                if aspect_key.endswith("global.data_quality") and aspect.path == "":
+                    return dict(aspect.data)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting table quality for {table_fqn}: {e}")
+            return None
+
+    def get_table_profile(self, use_profile, table_fqn):
+        """Gets the profile information for a table from Dataplex.
+
+        Args:
+            use_profile (bool): Whether to use profile information
+            table_fqn (str): The fully qualified name of the table
+
+        Returns:
+            dict: Table profile information or None if not available/enabled
+        """
+        if not use_profile:
+            return None
+            
+        try:
+            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
+            
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+            aspect_type = "projects/dataplex-types/locations/global/aspectTypes/data_profile"
+            aspect_types = [aspect_type]
+
+            request = dataplex_v1.GetEntryRequest(
+                name=entry_name,
+                view=dataplex_v1.EntryView.CUSTOM,
+                aspect_types=aspect_types
+            )
+            
+            entry = client.get_entry(request=request)
+            for aspect_key, aspect in entry.aspects.items():
+                if aspect_key.endswith("global.data_profile") and aspect.path == "":
+                    return dict(aspect.data)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting table profile for {table_fqn}: {e}")
+            return None
+
+    def get_table_sources_info(self, use_lineage_tables, table_fqn):
+        """Gets source table information from Dataplex.
+
+        Args:
+            use_lineage_tables (bool): Whether to use lineage table information
+            table_fqn (str): The fully qualified name of the table
+
+        Returns:
+            dict: Source table information or None if not available/enabled
+        """
+        if not use_lineage_tables:
+            return None
+            
+        try:
+            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
+            
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+            aspect_type = "projects/dataplex-types/locations/global/aspectTypes/lineage"
+            aspect_types = [aspect_type]
+
+            request = dataplex_v1.GetEntryRequest(
+                name=entry_name,
+                view=dataplex_v1.EntryView.CUSTOM,
+                aspect_types=aspect_types
+            )
+            
+            entry = client.get_entry(request=request)
+            for aspect_key, aspect in entry.aspects.items():
+                if aspect_key.endswith("global.lineage") and aspect.path == "":
+                    return dict(aspect.data)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting table sources info for {table_fqn}: {e}")
+            return None
+
+    def get_job_sources(self, use_lineage_processes, table_fqn):
+        """Gets job source information from Dataplex.
+
+        Args:
+            use_lineage_processes (bool): Whether to use lineage process information
+            table_fqn (str): The fully qualified name of the table
+
+        Returns:
+            dict: Job source information or None if not available/enabled
+        """
+        if not use_lineage_processes:
+            return None
+            
+        try:
+            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
+            
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+            aspect_type = "projects/dataplex-types/locations/global/aspectTypes/process_lineage"
+            aspect_types = [aspect_type]
+
+            request = dataplex_v1.GetEntryRequest(
+                name=entry_name,
+                view=dataplex_v1.EntryView.CUSTOM,
+                aspect_types=aspect_types
+            )
+            
+            entry = client.get_entry(request=request)
+            for aspect_key, aspect in entry.aspects.items():
+                if aspect_key.endswith("global.process_lineage") and aspect.path == "":
+                    return dict(aspect.data)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting job sources for {table_fqn}: {e}")
+            return None 

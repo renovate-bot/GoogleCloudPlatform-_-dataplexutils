@@ -69,9 +69,10 @@ interface GenerationPageProps {
   config: DatplexConfig;
   onTaskAdd: (task: Task) => void;
   onTaskUpdate: (taskId: string, updates: Partial<Task>) => void;
+  onConfigChange: (config: DatplexConfig) => void;
 }
 
-const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTaskUpdate }) => {
+const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTaskUpdate, onConfigChange }) => {
   const [apiUrlBase, setApiUrlBase] = useState<string>('');
   const [apiResponse, setApiResponse] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -90,20 +91,43 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
     const { name, value, type, checked } = event.target;
     const [parent, child] = name.split('.');
 
-    // Sync project_id and dataset_id between table and dataset settings
-    if (parent === 'table_settings' && (child === 'project_id' || child === 'dataset_id')) {
-      // No need to update dataset_settings directly here
+    const newConfig = { ...config };
+    if (parent === 'client_options_settings') {
+      // These properties are directly on the config object, not nested
+      if (type === 'checkbox') {
+        newConfig[child] = checked;
+      } else {
+        newConfig[child] = value;
+      }
+    } else if (parent === 'table_settings') {
+      // Handle table settings
+      if (child === 'project_id') {
+        newConfig.project_id = value;
+      } else if (child === 'dataset_id') {
+        newConfig.dataset_id = value;
+      } else if (child === 'table_id') {
+        newConfig.table_id = value;
+      } else if (child === 'documentation_uri') {
+        newConfig.documentation_uri = value;
+      }
+    } else if (parent === 'dataset_settings') {
+      // Handle dataset settings
+      if (child === 'documentation_csv_uri') {
+        newConfig.documentation_csv_uri = value;
+      }
     }
+    onConfigChange(newConfig);
   };
 
   const handleSelectChange = (event: SelectChangeEvent<string>) => {
     const { name, value } = event.target;
     const [parent, child] = name.split('.');
 
-    // Sync project_id and dataset_id between table and dataset settings
-    if (parent === 'table_settings' && (child === 'project_id' || child === 'dataset_id')) {
-      // No need to update dataset_settings directly here
+    const newConfig = { ...config };
+    if (parent === 'dataset_settings' && child === 'strategy') {
+      newConfig.strategy = value;
     }
+    onConfigChange(newConfig);
   };
 
   const callApi = async (endpoint: string) => {
@@ -155,44 +179,57 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
       setError(null);
       setIsGenerating(true);
 
+      const requestPayload = {
+        client_settings: {
+          project_id: config.project_id,
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
+        },
+        client_options_settings: {
+          use_lineage_tables: config.use_lineage_tables,
+          use_lineage_processes: config.use_lineage_processes,
+          use_profile: config.use_profile,
+          use_data_quality: config.use_data_quality,
+          use_ext_documents: config.use_ext_documents,
+          persist_to_dataplex_catalog: config.persist_to_dataplex_catalog,
+          stage_for_review: config.stage_for_review,
+          top_values_in_description: config.top_values_in_description,
+          description_handling: config.description_handling,
+          description_prefix: config.description_prefix,
+        },
+        table_settings: {
+          project_id: config.project_id,
+          dataset_id: config.dataset_id,
+          table_id: config.table_id,
+          documentation_uri: config.documentation_uri,
+        },
+        dataset_settings: {
+          project_id: config.project_id,
+          dataset_id: config.dataset_id,
+          documentation_csv_uri: config.documentation_csv_uri,
+          strategy: config.strategy
+        }
+      };
+
+      console.log('Sending request with payload:', requestPayload);
+
       const response = await axios.post(
         `${apiUrlBase}/${endpoint}`,
-        {
-          client_settings: {
-            project_id: config.project_id,
-            llm_location: config.llm_location,
-            dataplex_location: config.dataplex_location,
-          },
-          client_options_settings: {
-            use_lineage_tables: false,
-            use_lineage_processes: false,
-            use_profile: false,
-            use_data_quality: false,
-            use_ext_documents: false,
-            persist_to_dataplex_catalog: true,
-            stage_for_review: false,
-            top_values_in_description: true,
-          },
-          table_settings: {
-            project_id: config.project_id,
-            dataset_id: config.dataset_id,
-            table_id: config.table_id,
-            documentation_uri: '',
-          },
-          dataset_settings: {
-            project_id: config.project_id,
-            dataset_id: config.dataset_id,
-            documentation_csv_uri: '',
-            strategy: 'NAIVE'
-          }
-        }
+        requestPayload
       );
 
+      console.log('Received response:', response.data);
       setApiResponse(response.data);
       onTaskUpdate(taskId, { status: 'completed' });
     } catch (error) {
       console.error('API Error:', error);
-      const errorMessage = 'An error occurred while calling the API. Please check the console for details.';
+      let errorMessage = 'An error occurred while calling the API.';
+      
+      if (axios.isAxiosError(error)) {
+        console.error('Response data:', error.response?.data);
+        errorMessage = `API Error: ${error.response?.data?.detail || error.message}`;
+      }
+      
       setError(errorMessage);
       onTaskUpdate(taskId, { 
         status: 'failed',
@@ -463,35 +500,6 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, mb: 3 }}>
             <Typography variant="h2" gutterBottom>
-              Project Configuration
-            </Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <TextField
-                label="Project ID"
-                name="client_settings.project_id"
-                value={config.project_id}
-                onChange={handleInputChange}
-                fullWidth
-              />
-              <TextField
-                label="LLM Location"
-                name="client_settings.llm_location"
-                value={config.llm_location}
-                onChange={handleInputChange}
-                fullWidth
-              />
-              <TextField
-                label="Dataplex Location"
-                name="client_settings.dataplex_location"
-                value={config.dataplex_location}
-                onChange={handleInputChange}
-                fullWidth
-              />
-            </Box>
-          </Paper>
-
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h2" gutterBottom>
               Table Configuration
             </Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -621,17 +629,10 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
               </Alert>
             )}
 
-            {apiResponse && !('regeneration_counts' in apiResponse) && (
-              <Box>
-                <Typography variant="h2" gutterBottom>
-                  Generation Result
-                </Typography>
-                <Paper sx={{ p: 2, backgroundColor: 'grey.100' }}>
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
-                    {JSON.stringify(apiResponse, null, 2)}
-                  </pre>
-                </Paper>
-              </Box>
+            {apiResponse && !('regeneration_counts' in apiResponse) && apiResponse.status === 'success' && (
+              <Alert severity="success" sx={{ mb: 3 }}>
+                {apiResponse.message}
+              </Alert>
             )}
           </Paper>
         </Grid>

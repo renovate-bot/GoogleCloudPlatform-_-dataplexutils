@@ -212,14 +212,21 @@ class TableOperations:
                 self._client._dataplex_ops.update_table_dataplex_description(table_fqn, table_description)
                 logger.info(f"Table description updated for table {table_fqn} in Dataplex catalog")
         else:
-            if not self._check_if_exists_aspect_type(constants["ASPECT_TEMPLATE"]["name"]):
+            if not self._client._dataplex_ops._check_if_exists_aspect_type(constants["ASPECT_TEMPLATE"]["name"]):
                 logger.info(f"Aspect type {constants['ASPECT_TEMPLATE']['name']} not exists. Attempting to create it")
-                self._create_aspect_type(constants["ASPECT_TEMPLATE"]["name"])
+                self._client._dataplex_ops._create_aspect_type(constants["ASPECT_TEMPLATE"]["name"])
                 logger.info(f"Aspect type {constants['ASPECT_TEMPLATE']['name']} created")
             self._client._dataplex_ops.update_table_draft_description(table_fqn, table_description)
             logger.info(f"Table {table_fqn} will not be updated in BigQuery.")
-            None
-        return "Table description generated successfully"
+        return {
+            "status": "success",
+            "message": "Table description generated successfully",
+            "details": {
+                "table": table_fqn,
+                "staged_for_review": self._client._client_options._stage_for_review,
+                "persisted_to_dataplex": self._client._client_options._persist_to_dataplex_catalog
+            }
+        }
 
     def _get_tables_from_uri(self, documentation_csv_uri):
         """Reads the CSV file from Google Cloud Storage and returns the tables.
@@ -334,3 +341,59 @@ class TableOperations:
         except Exception as e:
             logger.error(f"Error listing tables in dataset {dataset_fqn}: {e}")
             raise e 
+
+    def _get_table_quality(self, use_data_quality, table_fqn):
+        """Gets the quality information for a table.
+
+        Args:
+            use_data_quality (bool): Whether to use data quality information
+            table_fqn (str): The fully qualified name of the table
+
+        Returns:
+            dict: Table quality information or None if not available/enabled
+        """
+        if not use_data_quality:
+            return None
+        return self._client._dataplex_ops.get_table_quality(use_data_quality, table_fqn)
+
+    def _get_table_profile(self, use_profile, table_fqn):
+        """Gets the profile information for a table.
+
+        Args:
+            use_profile (bool): Whether to use profile information
+            table_fqn (str): The fully qualified name of the table
+
+        Returns:
+            dict: Table profile information or None if not available/enabled
+        """
+        if not use_profile:
+            return None
+        return self._client._dataplex_ops.get_table_profile(use_profile, table_fqn)
+
+    def _get_table_sources_info(self, use_lineage_tables, table_fqn):
+        """Gets the source table information.
+
+        Args:
+            use_lineage_tables (bool): Whether to use lineage table information
+            table_fqn (str): The fully qualified name of the table
+
+        Returns:
+            dict: Source table information or None if not available/enabled
+        """
+        if not use_lineage_tables:
+            return None
+        return self._client._dataplex_ops.get_table_sources_info(use_lineage_tables, table_fqn)
+
+    def _get_job_sources(self, use_lineage_processes, table_fqn):
+        """Gets the job source information.
+
+        Args:
+            use_lineage_processes (bool): Whether to use lineage process information
+            table_fqn (str): The fully qualified name of the table
+
+        Returns:
+            dict: Job source information or None if not available/enabled
+        """
+        if not use_lineage_processes:
+            return None
+        return self._client._dataplex_ops.get_job_sources(use_lineage_processes, table_fqn) 

@@ -158,6 +158,7 @@ function App() {
                         config={dataplexConfig}
                         onTaskAdd={handleTaskAdd}
                         onTaskUpdate={handleTaskUpdate}
+                        onConfigChange={setDataplexConfig}
                       />
                     } 
                   />
