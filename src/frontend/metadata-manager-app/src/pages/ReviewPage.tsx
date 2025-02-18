@@ -48,9 +48,13 @@ import { DatplexConfig } from '../App';
 import { useCache } from '../contexts/CacheContext';
 import { useReview, MetadataItem } from '../contexts/ReviewContext';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 
 interface Comment {
+  id: string;
   text: string;
+  type: string;
+  timestamp: string;
 }
 
 interface EditorChangeHandler {
@@ -58,7 +62,14 @@ interface EditorChangeHandler {
 }
 
 interface ReviewPageProps {
-  config: DatplexConfig;
+  config: {
+    project_id: string;
+    llm_location: string;
+    dataplex_location: string;
+    dataset_id?: string;
+    description_handling?: string;
+    description_prefix?: string;
+  };
 }
 
 const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
@@ -80,6 +91,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   const editorRef = useRef<any>(null);
   const [isAccepting, setIsAccepting] = useState<{ [key: string]: boolean }>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [currentItemId, setCurrentItemId] = useState<string | null>(null);
 
   // Initialize API URL
   useEffect(() => {
@@ -120,9 +132,12 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     if (newMode) {
       dispatch({ type: 'SET_VIEW_MODE', payload: newMode });
       if (newMode === 'review' && items.length > 0) {
-        loadItemDetails(items[currentItemIndex].id);
-        if (currentItemIndex < items.length - 1) {
-          preloadNextItem(currentItemIndex);
+        // Only load details if not in cache
+        if (!detailsCache[items[currentItemIndex].id]) {
+          loadItemDetails(items[currentItemIndex].id);
+          if (currentItemIndex < items.length - 1) {
+            preloadNextItem(currentItemIndex);
+          }
         }
       }
     }
@@ -130,37 +145,47 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    if (viewMode === 'list') {
-      // For list view, refresh the entire list
-      try {
-        clearCache();
-        dispatch({ type: 'SET_HAS_LOADED', payload: false });
+    try {
+      if (viewMode === 'list') {
+        // In list mode, refresh the entire list
         await fetchReviewItems();
-      } finally {
-        setIsRefreshing(false);
+      } else if (viewMode === 'review' && items[currentItemIndex]) {
+        // In review mode, only refresh the current item's details
+        await loadItemDetails(items[currentItemIndex].id, true);
+        // Clear the cache for this item to ensure we get fresh data
+        setDetailsCache({
+          ...detailsCache,
+          [items[currentItemIndex].id]: undefined
+        });
       }
-    } else {
-      // For review mode, only refresh the current item's details
-      const currentItem = items[currentItemIndex];
-      if (currentItem) {
-        try {
-          // Clear the cache for this item only
-          setDetailsCache({
-            ...detailsCache,
-            [currentItem.id]: undefined
-          });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleViewDetails = async (itemId: string) => {
+    // Find the index of the item
+    const itemIndex = items.findIndex(item => item.id === itemId);
+    if (itemIndex !== -1) {
+      setCurrentItemId(itemId);
+      dispatch({ type: 'SET_CURRENT_INDEX', payload: itemIndex });
+      dispatch({ type: 'SET_VIEW_MODE', payload: 'review' });
+      
+      try {
+        // Only load details if not in cache
+        if (!detailsCache[itemId]) {
+          await loadItemDetails(itemId);
           
-          // Set loading state
-          setIsLoadingDetails(true);
-          
-          // Reload just the item details
-          await loadItemDetails(currentItem.id, true);
-        } finally {
-          setIsRefreshing(false);
-          setIsLoadingDetails(false);
+          // Preload the next item if there is one and it's not cached
+          if (itemIndex < items.length - 1) {
+            const nextItem = items[itemIndex + 1];
+            if (!detailsCache[nextItem.id]) {
+              await preloadNextItem(itemIndex);
+            }
+          }
         }
-      } else {
-        setIsRefreshing(false);
+      } catch (error) {
+        console.error('Error loading item details:', error);
       }
     }
   };
@@ -605,105 +630,93 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
 
   const renderListMode = () => (
     <Box>
-      <Paper>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell width="10%">Type</TableCell>
-                <TableCell width="20%">Name</TableCell>
-                <TableCell width="30%">Current Description</TableCell>
-                <TableCell width="30%">Draft Description</TableCell>
-                <TableCell width="10%">Status</TableCell>
-                <TableCell width="15%">Last Modified</TableCell>
-                <TableCell width="15%">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {items.map((item) => (
-                <TableRow 
-                  key={item.id}
-                  hover
-                  onClick={() => handleEdit(item)}
-                  sx={{ cursor: 'pointer' }}
-                >
-                  <TableCell>
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Name</TableCell>
+              <TableCell>Type</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Regeneration</TableCell>
+              <TableCell>Last Modified</TableCell>
+              <TableCell align="right">Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {items.map((item) => (
+              <TableRow
+                key={item.id}
+                onClick={() => handleViewDetails(item.id)}
+                sx={{ 
+                  '&:last-child td, &:last-child th': { border: 0 },
+                  '&:hover': {
+                    backgroundColor: 'action.hover',
+                    cursor: 'pointer'
+                  }
+                }}
+              >
+                <TableCell component="th" scope="row">
+                  {item.name}
+                </TableCell>
+                <TableCell>
+                  <Chip
+                    label={item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                    size="small"
+                    color={item.type === 'table' ? 'primary' : 'secondary'}
+                  />
+                </TableCell>
+                <TableCell>
+                  <Chip
+                    label={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                    size="small"
+                    color={getStatusColor(item.status)}
+                  />
+                </TableCell>
+                <TableCell>
+                  {item['to-be-regenerated'] && (
                     <Chip
-                      label={item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                      label="Marked for Regeneration"
                       size="small"
-                      color={item.type === 'table' ? 'primary' : 'secondary'}
-                    />
-                  </TableCell>
-                  <TableCell>{item.name}</TableCell>
-                  <TableCell>
-                    <Tooltip 
-                      title={<Box dangerouslySetInnerHTML={{ __html: item.currentDescription }} />}
-                      placement="bottom-start"
-                    >
-                      <Box>
-                        {renderDescription(item.currentDescription, true, true)}
-                      </Box>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell>
-                    <Tooltip 
-                      title={<Box dangerouslySetInnerHTML={{ __html: item.draftDescription }} />}
-                      placement="bottom-start"
-                    >
-                      <Box>
-                        {renderDescription(item.draftDescription, true, true)}
-                      </Box>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
-                      size="small"
-                      color={getStatusColor(item.status)}
-                    />
-                  </TableCell>
-                  <TableCell>{new Date(item.lastModified).toLocaleString()}</TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <IconButton
-                      color="primary"
-                      onClick={() => handleAccept(item)}
-                      disabled={item.status === 'accepted' || isAccepting[item.id]}
                       sx={{
-                        '& .MuiSvgIcon-root': {
-                          animation: isAccepting[item.id] ? 'spin 1s linear infinite' : 'none',
-                          '@keyframes spin': {
-                            '0%': { transform: 'rotate(0deg)' },
-                            '100%': { transform: 'rotate(360deg)' }
-                          }
-                        }
+                        backgroundColor: 'warning.main',
+                        color: 'warning.contrastText'
                       }}
+                      icon={<AutorenewIcon />}
+                    />
+                  )}
+                </TableCell>
+                <TableCell>
+                  {new Date(item.lastModified).toLocaleString()}
+                </TableCell>
+                <TableCell align="right">
+                  <Box onClick={(e) => e.stopPropagation()}>
+                    <IconButton
+                      onClick={() => handleViewDetails(item.id)}
+                      size="small"
+                      sx={{ mr: 1 }}
                     >
-                      <CheckCircleIcon />
+                      <VisibilityIcon />
                     </IconButton>
                     <IconButton
-                      color="primary"
-                      onClick={() => handleEdit(item)}
+                      onClick={() => handleMarkForRegeneration(item.id)}
+                      size="small"
+                      disabled={item['to-be-regenerated'] || item.isMarkingForRegeneration}
                     >
-                      <EditIcon />
+                      <AutorenewIcon sx={{ 
+                        animation: item.isMarkingForRegeneration ? 'spin 1s linear infinite' : 'none',
+                        '@keyframes spin': {
+                          '0%': { transform: 'rotate(0deg)' },
+                          '100%': { transform: 'rotate(360deg)' }
+                        }
+                      }} />
                     </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
-      {pageToken && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-          <Button
-            variant="contained"
-            onClick={() => fetchReviewItems(pageToken)}
-            disabled={isRefreshing}
-          >
-            Load More
-          </Button>
-        </Box>
-      )}
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
     </Box>
   );
 
@@ -833,6 +846,17 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
                   size="small"
                   color={getStatusColor(currentItem.status)}
                 />
+                {currentItem['to-be-regenerated'] && (
+                  <Chip
+                    label="Marked for Regeneration"
+                    size="small"
+                    sx={{
+                      backgroundColor: 'warning.main',
+                      color: 'warning.contrastText'
+                    }}
+                    icon={<AutorenewIcon />}
+                  />
+                )}
                 <Typography variant="body2" color="text.secondary">
                   Last modified: {new Date(currentItem.lastModified).toLocaleString()}
                 </Typography>
@@ -1041,9 +1065,17 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       }
       setError(null);
 
-      // Check cache first
-      if (detailsCache[itemId]) {
+      // Use cache if available and not explicitly refreshing
+      if (detailsCache[itemId] && !setLoading) {
         console.log('Using cached item details:', detailsCache[itemId]);
+        // Update the item in the state with cached details to ensure consistency
+        dispatch({
+          type: 'UPDATE_ITEM',
+          payload: {
+            id: itemId,
+            updates: detailsCache[itemId]
+          }
+        });
         return detailsCache[itemId];
       }
 
@@ -1051,7 +1083,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       const isColumn = itemId.includes('#column.');
       const columnName = isColumn ? itemId.split('#column.')[1] : undefined;
 
-      console.log('Fetching details for item:', itemId);
+      console.log(`${setLoading ? 'Fetching' : 'Preloading'} details for item:`, itemId);
       const response = await axios.post(`${apiUrlBase}/metadata/review/details`, {
         client_settings: {
           project_id: config.project_id,
@@ -1068,31 +1100,41 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
 
       // Response is no longer wrapped in a data field
       const details = response.data;
-      console.log('Received item details:', details);
+      console.log(`${setLoading ? 'Received' : 'Preloaded'} item details:`, details);
+
+      // Use the regeneration status from the API response
+      const updatedDetails = {
+        ...details,
+        'to-be-regenerated': details.markedForRegeneration,
+        lastModified: details.lastModified || new Date().toISOString()
+      };
 
       // Update the item in the state with the new details
       dispatch({
         type: 'UPDATE_ITEM',
         payload: {
           id: itemId,
-          updates: {
-            ...details,
-            lastModified: details.lastModified || new Date().toISOString()
-          }
+          updates: updatedDetails
         }
       });
 
       // Update cache
       setDetailsCache({
         ...detailsCache,
-        [itemId]: details
+        [itemId]: updatedDetails
       });
 
-      return details;
+      return updatedDetails;
 
     } catch (error: any) {
-      console.error('Error loading item details:', error);
-      setError(error.response?.data?.detail || 'Failed to load item details');
+      const errorMessage = error.response?.data?.detail || 'Failed to load item details';
+      if (setLoading) {
+        // Only show errors to the user for active loading, not preloading
+        console.error('Error loading item details:', error);
+        setError(errorMessage);
+      } else {
+        console.warn('Error preloading item details:', errorMessage);
+      }
       return null;
     } finally {
       if (setLoading) {
@@ -1108,15 +1150,12 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       const nextItem = items[nextItemIndex];
       console.log('Preloading next item:', nextItem.id, 'at index:', nextItemIndex);
       
-      if (!detailsCache[nextItem.id]) {
-        setIsLoadingNext(true);
-        try {
-          await loadItemDetails(nextItem.id, false);
-        } finally {
-          setIsLoadingNext(false);
-        }
-      } else {
-        console.log('Next item already cached:', nextItem.id);
+      try {
+        // Always load the next item's details, don't rely on cache for preloading
+        await loadItemDetails(nextItem.id, false);
+        console.log('Successfully preloaded next item:', nextItem.id);
+      } catch (error) {
+        console.error('Error preloading next item:', error);
       }
     }
   };
