@@ -92,12 +92,50 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   const [isAccepting, setIsAccepting] = useState<{ [key: string]: boolean }>({});
   const [isLoading, setIsLoading] = useState(false);
   const [currentItemId, setCurrentItemId] = useState<string | null>(null);
+  const [taggedColumns, setTaggedColumns] = useState<MetadataItem[]>([]);
+  const [currentColumnIndex, setCurrentColumnIndex] = useState<number>(-1);
+  const [isColumnView, setIsColumnView] = useState(false);
 
   // Initialize API URL
   useEffect(() => {
     const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
     setApiUrlBase(apiUrl);
   }, []);
+
+  // Sync column navigation state with current item
+  useEffect(() => {
+    if (viewMode === 'review' && items.length > 0 && currentItemIndex >= 0) {
+      const currentItem = items[currentItemIndex];
+      
+      if (currentItem) {
+        // If this is a table (not a column), ensure currentItemId is set to the table ID
+        if (!currentItem.id.includes('#column.')) {
+          const tableId = currentItem.id;
+          
+          console.log('Syncing currentItemId to table:', tableId);
+          
+          // Only update if different to avoid infinite loops
+          if (currentItemId !== tableId) {
+            setCurrentItemId(tableId);
+          }
+          
+          // If cached details exist, ensure taggedColumns is populated
+          if (detailsCache[tableId]?.columns) {
+            const columnsWithMetadata = detailsCache[tableId].columns.filter((col: any) => 
+              col.draftDescription || col.currentDescription || 
+              (col.metadata && Object.keys(col.metadata).length > 0)
+            );
+            
+            // Only update if different to avoid infinite loops
+            if (taggedColumns.length !== columnsWithMetadata.length) {
+              console.log('Syncing taggedColumns:', columnsWithMetadata.length);
+              setTaggedColumns(columnsWithMetadata);
+            }
+          }
+        }
+      }
+    }
+  }, [viewMode, items, currentItemIndex, detailsCache]);
 
   // Add keyboard navigation
   useEffect(() => {
@@ -116,6 +154,18 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       window.removeEventListener('keydown', handleKeyPress as unknown as EventListener);
     };
   }, [viewMode, currentItemIndex, items.length]);
+
+  // Add a useEffect to track state changes for debugging
+  useEffect(() => {
+    console.log('State change detected:', {
+      viewMode,
+      currentItemIndex,
+      currentItemId,
+      isColumnView: items[currentItemIndex]?.currentColumn ? true : false,
+      taggedColumnsCount: taggedColumns.length,
+      currentColumnIndex
+    });
+  }, [viewMode, currentItemIndex, currentItemId, items, taggedColumns, currentColumnIndex]);
 
   // Load items if not loaded
   useEffect(() => {
@@ -172,20 +222,59 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       dispatch({ type: 'SET_VIEW_MODE', payload: 'review' });
       
       try {
-        // Only load details if not in cache
-        if (!detailsCache[itemId]) {
-          await loadItemDetails(itemId);
+        // Check if we have cached data
+        if (detailsCache[itemId]) {
+          console.log('Using cached item details:', detailsCache[itemId]);
+          const cachedDetails = detailsCache[itemId];
           
-          // Preload the next item if there is one and it's not cached
-          if (itemIndex < items.length - 1) {
-            const nextItem = items[itemIndex + 1];
-            if (!detailsCache[nextItem.id]) {
-              await preloadNextItem(itemIndex);
+          // Initialize column navigation state for tables
+          if (!itemId.includes('#column.') && cachedDetails.columns) {
+            const columnsWithMetadata = cachedDetails.columns.filter((col: any) => 
+              col.draftDescription || col.currentDescription || 
+              (col.metadata && Object.keys(col.metadata).length > 0)
+            );
+            setTaggedColumns(columnsWithMetadata);
+            setCurrentColumnIndex(-1);
+          }
+          
+          // Ensure we're showing table details, not column
+          dispatch({
+            type: 'UPDATE_ITEM',
+            payload: {
+              id: itemId,
+              updates: {
+                ...cachedDetails,
+                currentColumn: null // Ensure no column is selected
+              }
             }
+          });
+        } else {
+          // Load and cache the current item's details
+          console.log('Loading item details for:', itemId);
+          const details = await loadItemDetails(itemId);
+          
+          // Initialize column navigation state for tables when loading fresh data
+          if (!itemId.includes('#column.') && details?.columns) {
+            const columnsWithMetadata = details.columns.filter((col: any) => 
+              col.draftDescription || col.currentDescription || 
+              (col.metadata && Object.keys(col.metadata).length > 0)
+            );
+            setTaggedColumns(columnsWithMetadata);
+            setCurrentColumnIndex(-1);
+          }
+        }
+        
+        // Always try to preload the next item if it exists and isn't cached
+        if (itemIndex < items.length - 1) {
+          const nextItem = items[itemIndex + 1];
+          if (!detailsCache[nextItem.id]) {
+            console.log('Preloading next item:', nextItem.id);
+            await preloadNextItem(itemIndex);
           }
         }
       } catch (error) {
         console.error('Error loading item details:', error);
+        setError('Failed to load item details');
       }
     }
   };
@@ -195,11 +284,14 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       setError(null);
       setIsAccepting(prev => ({ ...prev, [item.id]: true }));
       
-      // Extract table FQN from the item ID
       const tableFqn = item.id.split('#')[0];
       const [projectId, datasetId, tableId] = tableFqn.split('.');
+      const isColumn = item.type === 'column';
+      const columnName = isColumn ? item.id.split('#column.')[1] : undefined;
       
-      const response = await axios.post(`${apiUrlBase}/accept_table_draft_description`, {
+      const endpoint = isColumn ? 'accept_column_draft_description' : 'accept_table_draft_description';
+      
+      await axios.post(`${apiUrlBase}/${endpoint}`, {
         client_settings: {
           project_id: config.project_id,
           llm_location: config.llm_location,
@@ -221,37 +313,43 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           project_id: projectId,
           dataset_id: datasetId,
           table_id: tableId,
-          documentation_uri: item.externalDocumentUri || ""
+          documentation_uri: item.metadata?.external_document_uri || item.externalDocumentUri || ""
         },
         dataset_settings: {
           project_id: projectId,
           dataset_id: datasetId,
           documentation_csv_uri: "",
           strategy: "NAIVE"
-        }
+        },
+        column_name: columnName
       });
 
-      // Update the item in the UI to reflect acceptance
+      // Update both state and cache with the accepted status
+      const updatedItem: Partial<MetadataItem> = {
+        status: 'accepted' as const,
+        currentDescription: item.draftDescription,
+        whenAccepted: new Date().toISOString()
+      };
+
       dispatch({
         type: 'UPDATE_ITEM',
         payload: { 
           id: item.id, 
-          updates: { 
-            status: 'accepted',
-            currentDescription: item.draftDescription, // Update the current description with the draft
-            whenAccepted: new Date().toISOString()
-          } 
+          updates: updatedItem
         }
       });
 
-      // Clear the cache for this item to ensure fresh data on next load
-      setDetailsCache({
-        ...detailsCache,
-        [item.id]: undefined
-      });
+      // Update cache
+      setDetailsCache(prev => ({
+        ...prev,
+        [item.id]: {
+          ...prev[item.id],
+          ...updatedItem
+        }
+      }));
 
       // If in review mode, refresh the item details to get the updated state
-      if (viewMode === 'review' && items[currentItemIndex].id === item.id) {
+      if (viewMode === 'review') {
         await loadItemDetails(item.id, true);
       }
 
@@ -289,7 +387,12 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
 
   // Separate handler for editing in review mode
   const handleEditInReview = (item: MetadataItem) => {
-    setEditItem(item);
+    // Ensure we're editing the correct item (table or column)
+    setEditItem({
+      ...item,
+      type: item.type, // Preserve the type (table or column)
+      id: item.id // Preserve the full ID which includes column info if it's a column
+    });
     setEditDialogOpen(true);
   };
 
@@ -300,10 +403,12 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
         
         const tableFqn = editItem.id.split('#')[0];
         const [projectId, datasetId, tableId] = tableFqn.split('.');
-        const isColumn = editItem.id.includes('#column.');
+        const isColumn = editItem.type === 'column';
         const columnName = isColumn ? editItem.id.split('#column.')[1] : undefined;
         
-        await axios.post(`${apiUrlBase}/update_table_draft_description`, {
+        const endpoint = isColumn ? 'update_column_draft_description' : 'update_table_draft_description';
+        
+        await axios.post(`${apiUrlBase}/${endpoint}`, {
           client_settings: {
             project_id: config.project_id,
             llm_location: config.llm_location,
@@ -313,22 +418,36 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
             project_id: projectId,
             dataset_id: datasetId,
             table_id: tableId,
-            documentation_uri: editItem.externalDocumentUri || ""
+            documentation_uri: editItem.metadata?.external_document_uri || editItem.externalDocumentUri || ""
           },
           description: editItem.draftDescription,
-          is_html: isRichText
+          is_html: isRichText,
+          column_name: columnName
         });
         
+        // Update both state and cache with the new description
+        const updatedItem = {
+          ...editItem,
+          draftDescription: editItem.draftDescription,
+          lastModified: new Date().toISOString()
+        };
+
         dispatch({
           type: 'UPDATE_ITEM',
           payload: { 
             id: editItem.id, 
-            updates: {
-              ...editItem,
-              lastModified: new Date().toISOString()
-            }
+            updates: updatedItem
           }
         });
+
+        // Update cache
+        setDetailsCache(prev => ({
+          ...prev,
+          [editItem.id]: {
+            ...prev[editItem.id],
+            ...updatedItem
+          }
+        }));
         
         setEditDialogOpen(false);
         setEditItem(null);
@@ -365,17 +484,34 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           table_id: tableId,
         },
         comment: newComment,
-        column_name: columnName
+        column_name: columnName,
+        is_column_comment: isColumn
       });
 
-      const updatedComments = [...(item.comments || []), newComment];
+      // Update the comments in the state
+      const updatedItem = {
+        ...item,
+        comments: [...(item.comments || []), newComment]
+      };
+
       dispatch({
         type: 'UPDATE_ITEM',
         payload: { 
           id: itemId, 
-          updates: { comments: updatedComments } 
+          updates: updatedItem
         }
       });
+
+      // Update the cache
+      if (isColumn) {
+        setDetailsCache(prev => ({
+          ...prev,
+          [itemId]: {
+            ...prev[itemId],
+            comments: updatedItem.comments
+          }
+        }));
+      }
 
       setNewComment('');
 
@@ -423,7 +559,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
         payload: {
           id: itemId,
           updates: {
-            'to-be-regenerated': true,
+            toBeRegenerated: true,
             isMarkingForRegeneration: false
           }
         }
@@ -450,25 +586,47 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     }
   };
 
-  const handleNext = async () => {
+  const handleNext = () => {
     if (currentItemIndex < items.length - 1) {
-      const nextIndex = currentItemIndex + 1;
-      dispatch({ type: 'SET_CURRENT_INDEX', payload: nextIndex });
-      await loadItemDetails(items[nextIndex].id);
-      if (nextIndex < items.length - 2) {
-        preloadNextItem(nextIndex);
+      const nextItem = items[currentItemIndex + 1];
+      
+      // If moving to a table, load its columns
+      if (nextItem.type === 'table') {
+        setCurrentItemId(nextItem.id);
+        // Let loadItemDetails handle setting up the column state
+      } else {
+        // If moving to a column, ensure it belongs to the current table
+        const tableId = nextItem.id.split('#')[0];
+        if (tableId !== currentItemId) {
+          // Moving to a column of a different table
+          setCurrentItemId(tableId);
+        }
       }
+      
+      dispatch({ type: 'SET_CURRENT_INDEX', payload: currentItemIndex + 1 });
+      loadItemDetails(nextItem.id);
     }
   };
 
-  const handlePrevious = async () => {
+  const handlePrevious = () => {
     if (currentItemIndex > 0) {
-      const prevIndex = currentItemIndex - 1;
-      dispatch({ type: 'SET_CURRENT_INDEX', payload: prevIndex });
-      await loadItemDetails(items[prevIndex].id);
-      if (prevIndex < items.length - 1) {
-        preloadNextItem(prevIndex);
+      const prevItem = items[currentItemIndex - 1];
+      
+      // If moving to a table, load its columns
+      if (prevItem.type === 'table') {
+        setCurrentItemId(prevItem.id);
+        // Let loadItemDetails handle setting up the column state
+      } else {
+        // If moving to a column, ensure it belongs to the current table
+        const tableId = prevItem.id.split('#')[0];
+        if (tableId !== currentItemId) {
+          // Moving to a column of a different table
+          setCurrentItemId(tableId);
+        }
       }
+      
+      dispatch({ type: 'SET_CURRENT_INDEX', payload: currentItemIndex - 1 });
+      loadItemDetails(prevItem.id);
     }
   };
 
@@ -547,7 +705,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
                   onChange={(e) => setShowDiff(e.target.checked)}
                 />
               }
-              label={showDiff ? "Showing Diff View" : "Showing Both Versions"}
+              label={showDiff ? "Showing Diff View" : "Showing Side by Side"}
             />
             {!hasChanges && (
               <Typography variant="subtitle1" color="text.secondary">
@@ -585,6 +743,20 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
               leftTitle="Current Version"
               rightTitle="Draft Version"
               compareMethod={DiffMethod.WORDS}
+              styles={{
+                variables: {
+                  light: {
+                    diffViewerBackground: '#f8f9fa',
+                    diffViewerColor: '#212529',
+                    addedBackground: '#e6ffec',
+                    addedColor: '#24292f',
+                    removedBackground: '#ffebe9',
+                    removedColor: '#24292f',
+                    wordAddedBackground: '#abf2bc',
+                    wordRemovedBackground: '#fdb8c0',
+                  }
+                }
+              }}
             />
           </Box>
         ) : (
@@ -615,7 +787,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     );
   };
 
-  const renderComments = (comments: string[]) => (
+  const renderComments = (comments: string[] = []) => (
     <List>
       {comments.map((comment, index) => (
         <React.Fragment key={index}>
@@ -637,43 +809,753 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
               <TableCell>Name</TableCell>
               <TableCell>Type</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>Tags</TableCell>
+              <TableCell>Tagged Columns</TableCell>
               <TableCell>Regeneration</TableCell>
               <TableCell>Last Modified</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {items.map((item) => (
-              <TableRow
-                key={item.id}
-                onClick={() => handleViewDetails(item.id)}
-                sx={{ 
-                  '&:last-child td, &:last-child th': { border: 0 },
-                  '&:hover': {
-                    backgroundColor: 'action.hover',
-                    cursor: 'pointer'
-                  }
-                }}
-              >
-                <TableCell component="th" scope="row">
-                  {item.name}
-                </TableCell>
-                <TableCell>
+            {items.map((item) => {
+              const itemDetails = detailsCache[item.id];
+              const taggedColumnsCount = itemDetails?.columns?.filter((col: any) => 
+                col.tags && Object.keys(col.tags).length > 0 && 
+                col.tags.some((tag: any) => tag.description && tag.description.trim() !== '')
+              )?.length || 0;
+
+              return (
+                <TableRow
+                  key={item.id}
+                  onClick={() => handleViewDetails(item.id)}
+                  sx={{ 
+                    '&:last-child td, &:last-child th': { border: 0 },
+                    '&:hover': {
+                      backgroundColor: 'action.hover',
+                      cursor: 'pointer'
+                    }
+                  }}
+                >
+                  <TableCell component="th" scope="row">
+                    {item.name}
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                      size="small"
+                      color={item.type === 'table' ? 'primary' : 'secondary'}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                      size="small"
+                      color={getStatusColor(item.status)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {item.tags && (
+                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                        {Object.entries(item.tags).map(([tag, value]) => (
+                          <Chip
+                            key={tag}
+                            label={tag}
+                            size="small"
+                            variant="outlined"
+                          />
+                        ))}
+                      </Box>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {item.type === 'table' && taggedColumnsCount > 0 && (
+                      <Chip
+                        label={`${taggedColumnsCount} tagged columns`}
+                        size="small"
+                        color="info"
+                      />
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <IconButton
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleMarkForRegeneration(item.id);
+                        }}
+                        size="small"
+                        disabled={item.toBeRegenerated || item['to-be-regenerated'] || item.metadata?.to_be_regenerated || item.isMarkingForRegeneration}
+                      >
+                        <AutorenewIcon sx={{ 
+                          animation: item.isMarkingForRegeneration ? 'spin 1s linear infinite' : 'none',
+                          '@keyframes spin': {
+                            '0%': { transform: 'rotate(0deg)' },
+                            '100%': { transform: 'rotate(360deg)' }
+                          }
+                        }} />
+                      </IconButton>
+                    </Box>
+                  </TableCell>
+                  <TableCell>{item.lastModified}</TableCell>
+                  <TableCell align="right">
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                      <IconButton
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewDetails(item.id);
+                        }}
+                        size="small"
+                      >
+                        <VisibilityIcon />
+                      </IconButton>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
+  );
+
+  const renderActionBar = (currentItem: MetadataItem) => {
+    const isViewingColumn = currentItem.type === 'column' || Boolean(currentItem.currentColumn);
+    const isViewingTable = !isViewingColumn;
+    
+    // Check if the current table has tagged columns
+    const hasTaggedColumns = taggedColumns.length > 0;
+    
+    // Debug information
+    console.log('Action Bar State:', {
+      isViewingColumn,
+      isViewingTable,
+      hasTaggedColumns,
+      currentColumnIndex,
+      taggedColumnsCount: taggedColumns.length,
+      currentItemId,
+      currentItemType: currentItem.type,
+      hasCurrentColumn: Boolean(currentItem.currentColumn)
+    });
+    
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* Left side - Edit and Accept buttons */}
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => handleEditInReview(currentItem)}
+            startIcon={<EditIcon />}
+          >
+            Edit
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            onClick={() => handleAccept(currentItem)}
+            startIcon={<CheckCircleIcon />}
+            disabled={!currentItem.draftDescription || isAccepting[currentItem.id]}
+          >
+            {isAccepting[currentItem.id] ? 'Accepting...' : 'Accept'}
+          </Button>
+          {/* Debug button */}
+          <Button
+            variant="outlined"
+            color="warning"
+            onClick={logDebugInfo}
+            size="small"
+          >
+            Debug
+          </Button>
+        </Box>
+
+        {/* Right side - Navigation buttons */}
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          {/* Previous button */}
+          <Button
+            variant="outlined"
+            onClick={handlePrevious}
+            disabled={currentItemIndex === 0}
+            startIcon={<NavigateBeforeIcon />}
+          >
+            Previous
+          </Button>
+
+          {/* Column navigation buttons */}
+          <Box sx={{ display: 'flex', gap: 1, mx: 2 }}>
+            <Button
+              variant={hasTaggedColumns ? "contained" : "outlined"}
+              color="info"
+              onClick={handlePrevColumn}
+              disabled={!hasTaggedColumns || currentColumnIndex <= 0}
+              startIcon={<NavigateBeforeIcon />}
+              sx={{ minWidth: '120px' }}
+            >
+              Prev Column
+            </Button>
+            <Button
+              variant={isViewingColumn ? "contained" : "outlined"}
+              color="info"
+              onClick={handleBackToTable}
+              disabled={!isViewingColumn}
+              sx={{ minWidth: '80px' }}
+            >
+              Table
+            </Button>
+            <Button
+              variant={hasTaggedColumns ? "contained" : "outlined"}
+              color="info"
+              onClick={handleNextColumn}
+              disabled={!hasTaggedColumns || currentColumnIndex >= taggedColumns.length - 1}
+              endIcon={<NavigateNextIcon />}
+              sx={{ minWidth: '120px' }}
+            >
+              Next Column
+            </Button>
+          </Box>
+
+          {/* Next button */}
+          <Button
+            variant="outlined"
+            onClick={handleNext}
+            disabled={currentItemIndex === items.length - 1}
+            endIcon={<NavigateNextIcon />}
+          >
+            Next
+          </Button>
+        </Box>
+      </Box>
+    );
+  };
+
+  const handleNextColumn = () => {
+    // Defensive checks with detailed logging
+    if (!currentItemId) {
+      console.log('Cannot navigate: currentItemId is not set');
+      return;
+    }
+    
+    if (taggedColumns.length === 0) {
+      console.log('Cannot navigate: no tagged columns available');
+      return;
+    }
+    
+    if (currentColumnIndex >= taggedColumns.length - 1) {
+      console.log('Cannot navigate: already at the last column', currentColumnIndex, taggedColumns.length);
+      return;
+    }
+
+    // Get the current table ID, whether we're viewing a table or a column
+    const currentItem = items[currentItemIndex];
+    const tableId = currentItem.type === 'table' ? currentItem.id : currentItem.id.split('#')[0];
+    
+    // Ensure we're working with the correct table
+    if (tableId !== currentItemId) {
+      console.log('Table ID mismatch - updating currentItemId:', tableId, 'was:', currentItemId);
+      // Force update the currentItemId to match the current table
+      setCurrentItemId(tableId);
+    }
+
+    // Always use the next index rather than relying on the current state
+    const nextColumnIndex = currentColumnIndex + 1;
+    const nextColumn = taggedColumns[nextColumnIndex];
+    
+    if (!nextColumn) {
+      console.log('No next column found at index:', nextColumnIndex);
+      return;
+    }
+    
+    const nextColumnId = `${tableId}#column.${nextColumn.name.split('.').pop()}`;
+    console.log('Navigating to next column:', nextColumnId, 'index:', nextColumnIndex);
+    
+    // Create a temporary column item for display
+    const columnItem: MetadataItem = {
+      id: nextColumnId,
+      type: 'column',
+      name: nextColumn.name,
+      status: nextColumn.status || 'draft',
+      currentDescription: nextColumn.currentDescription || '',
+      draftDescription: nextColumn.draftDescription || '',
+      comments: nextColumn.comments || [],
+      parentTableId: tableId,
+      lastModified: new Date().toISOString(),
+      isHtml: false
+    };
+    
+    // Update column index
+    setCurrentColumnIndex(nextColumnIndex);
+    
+    // Use cached data if available
+    if (detailsCache[nextColumnId]) {
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: tableId, // Update the current table item
+          updates: {
+            currentColumn: columnItem
+          }
+        }
+      });
+      
+      // Also update the column's data separately
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: nextColumnId,
+          updates: detailsCache[nextColumnId]
+        }
+      });
+    } else {
+      loadItemDetails(nextColumnId);
+    }
+  };
+
+  const handlePrevColumn = () => {
+    // Defensive checks with detailed logging
+    if (!currentItemId) {
+      console.log('Cannot navigate: currentItemId is not set');
+      return;
+    }
+    
+    if (taggedColumns.length === 0) {
+      console.log('Cannot navigate: no tagged columns available');
+      return;
+    }
+    
+    if (currentColumnIndex <= 0) {
+      console.log('Cannot navigate: already at the first column', currentColumnIndex);
+      return;
+    }
+
+    // Get the current table ID, whether we're viewing a table or a column
+    const currentItem = items[currentItemIndex];
+    const tableId = currentItem.type === 'table' ? currentItem.id : currentItem.id.split('#')[0];
+    
+    // Ensure we're working with the correct table
+    if (tableId !== currentItemId) {
+      console.log('Table ID mismatch - updating currentItemId:', tableId, 'was:', currentItemId);
+      // Force update the currentItemId to match the current table
+      setCurrentItemId(tableId);
+    }
+
+    // Always use the previous index rather than relying on the current state
+    const prevColumnIndex = currentColumnIndex - 1;
+    const prevColumn = taggedColumns[prevColumnIndex];
+    
+    if (!prevColumn) {
+      console.log('No previous column found at index:', prevColumnIndex);
+      return;
+    }
+    
+    const prevColumnId = `${tableId}#column.${prevColumn.name.split('.').pop()}`;
+    console.log('Navigating to previous column:', prevColumnId, 'index:', prevColumnIndex);
+    
+    // Create a temporary column item for display
+    const columnItem: MetadataItem = {
+      id: prevColumnId,
+      type: 'column',
+      name: prevColumn.name,
+      status: prevColumn.status || 'draft',
+      currentDescription: prevColumn.currentDescription || '',
+      draftDescription: prevColumn.draftDescription || '',
+      comments: prevColumn.comments || [],
+      parentTableId: tableId,
+      lastModified: new Date().toISOString(),
+      isHtml: false
+    };
+    
+    // Update column index
+    setCurrentColumnIndex(prevColumnIndex);
+    
+    // Use cached data if available
+    if (detailsCache[prevColumnId]) {
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: tableId, // Update the current table item
+          updates: {
+            currentColumn: columnItem
+          }
+        }
+      });
+      
+      // Also update the column's data separately
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: prevColumnId,
+          updates: detailsCache[prevColumnId]
+        }
+      });
+    } else {
+      loadItemDetails(prevColumnId);
+    }
+  };
+
+  const handleBackToTable = async () => {
+    const currentItem = items[currentItemIndex];
+    if (!currentItem) {
+      console.log('Cannot go back to table: no current item');
+      return;
+    }
+    
+    if (!currentItem.currentColumn) {
+      console.log('Already in table view');
+      return;
+    }
+    
+    // Get the table ID from the current item
+    const tableId = currentItem.id;
+    
+    console.log('Going back to table:', tableId, 'from column:', currentItem.currentColumn.id);
+    
+    try {
+      // Set loading state to provide visual feedback
+      setIsLoadingDetails(true);
+      
+      // Reset column index
+      setCurrentColumnIndex(-1);
+      
+      // Ensure currentItemId is set to the table ID
+      setCurrentItemId(tableId);
+      
+      // Create a clean copy of the current item without the column data
+      const tableItem = {
+        ...currentItem,
+        currentColumn: null
+      };
+      
+      // Update the state to show the table instead of the column
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: tableId,
+          updates: tableItem
+        }
+      });
+      
+      // Log for debugging
+      console.log('Back to table view complete - updated state:', {
+        tableId,
+        hasCurrentColumn: Boolean(tableItem.currentColumn),
+        taggedColumnsCount: taggedColumns.length
+      });
+    } catch (error) {
+      console.error('Error going back to table:', error);
+      setError('Failed to go back to table view. Please try again.');
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
+  const loadItemDetails = async (itemId: string, forceRefresh = false) => {
+    try {
+      setIsLoadingDetails(true);
+      setError(null);
+
+      // Use cache if available and not forcing refresh
+      if (!forceRefresh && detailsCache[itemId]) {
+        console.log('Using cached item details:', itemId);
+        const cachedDetails = detailsCache[itemId];
+
+        if (itemId.includes('#column.')) {
+          const columnDetails = {
+            ...cachedDetails,
+            id: itemId,
+            type: 'column',
+            comments: cachedDetails.comments || [],
+            currentDescription: cachedDetails.currentDescription || '',
+            draftDescription: cachedDetails.draftDescription || '',
+            status: cachedDetails.status || 'draft'
+          };
+          dispatch({
+            type: 'UPDATE_ITEM',
+            payload: {
+              id: itemId,
+              updates: columnDetails
+            }
+          });
+
+          const tableId = itemId.split('#')[0];
+          if (tableId !== currentItemId) {
+            const tableDetails = detailsCache[tableId];
+            if (tableDetails?.columns) {
+              const columnsWithMetadata = tableDetails.columns.filter((col: any) => 
+                col.draftDescription || col.currentDescription || 
+                (col.metadata && Object.keys(col.metadata).length > 0)
+              );
+              setTaggedColumns(columnsWithMetadata);
+              const columnName = itemId.split('#column.')[1];
+              const columnIndex = columnsWithMetadata.findIndex(col => col.name.endsWith(columnName));
+              if (columnIndex !== -1) {
+                setCurrentColumnIndex(columnIndex);
+              }
+            }
+          }
+          return columnDetails;
+        }
+
+        // For table details: reinitialize column navigation state and clear any active column
+        if (cachedDetails.columns) {
+          const columnsWithMetadata = cachedDetails.columns.filter((col: any) => 
+            col.draftDescription || col.currentDescription || 
+            (col.metadata && Object.keys(col.metadata).length > 0)
+          );
+          setTaggedColumns(columnsWithMetadata);
+          setCurrentColumnIndex(-1);
+          setCurrentItemId(itemId);
+        }
+
+        // Clear any active column for table details
+        const updatedDetails = { ...cachedDetails, currentColumn: null };
+        dispatch({
+          type: 'UPDATE_ITEM',
+          payload: {
+            id: itemId,
+            updates: updatedDetails
+          }
+        });
+        // Also update the cache with the cleared currentColumn
+        setDetailsCache(prev => ({ ...prev, [itemId]: updatedDetails }));
+        return updatedDetails;
+      }
+
+      const [projectId, datasetId, tableId] = itemId.split('#')[0].split('.');
+      const isColumn = itemId.includes('#column.');
+
+      console.log('Fetching details for item:', itemId);
+      const response = await axios.post(`${apiUrlBase}/metadata/review/details`, {
+        client_settings: {
+          project_id: config.project_id,
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
+        },
+        table_settings: {
+          project_id: projectId,
+          dataset_id: datasetId,
+          table_id: tableId,
+        }
+      });
+
+      const details = response.data;
+      console.log('Received item details:', details);
+
+      // If this is a column request, find the column details in the table response
+      let itemDetails;
+      if (isColumn) {
+        const columnName = itemId.split('#column.')[1];
+        itemDetails = details.columns?.find((col: any) => col.name.endsWith(columnName));
+        if (!itemDetails) {
+          throw new Error(`Column ${columnName} not found in table details`);
+        }
+        // When viewing a column, we should still maintain the tagged columns list
+        if (details.columns) {
+          const columnsWithMetadata = details.columns.filter((col: any) => 
+            col.draftDescription || col.currentDescription || 
+            (col.metadata && Object.keys(col.metadata).length > 0)
+          );
+          console.log('Found columns with metadata:', columnsWithMetadata.length);
+          setTaggedColumns(columnsWithMetadata);
+          // Set the current column index based on the loaded column
+          const columnIndex = columnsWithMetadata.findIndex(col => col.name.endsWith(columnName));
+          if (columnIndex !== -1) {
+            setCurrentColumnIndex(columnIndex);
+          }
+        }
+      } else {
+        itemDetails = details;
+        // Update column list when loading table details
+        if (details.columns) {
+          const columnsWithMetadata = details.columns.filter((col: any) => 
+            col.draftDescription || col.currentDescription || 
+            (col.metadata && Object.keys(col.metadata).length > 0)
+          );
+          console.log('Found columns with metadata:', columnsWithMetadata.length);
+          setTaggedColumns(columnsWithMetadata);
+          setCurrentColumnIndex(-1);
+          setCurrentItemId(itemId);
+        }
+      }
+
+      const updatedDetails = {
+        ...itemDetails,
+        currentColumn: !isColumn ? null : itemDetails.currentColumn,
+        'to-be-regenerated': itemDetails.markedForRegeneration,
+        lastModified: itemDetails.lastModified || new Date().toISOString()
+      };
+
+      // Update the item in state
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: itemId,
+          updates: updatedDetails
+        }
+      });
+
+      // Cache both table and column details
+      const newCache = { ...detailsCache };
+      if (!isColumn) {
+        newCache[itemId] = updatedDetails;
+        // Cache all columns from this table
+        details.columns?.forEach((col: any) => {
+          const columnId = `${itemId}#column.${col.name.split('.').pop()}`;
+          newCache[columnId] = col;
+        });
+      } else {
+        newCache[itemId] = updatedDetails;
+      }
+      setDetailsCache(newCache);
+
+      return updatedDetails;
+
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.detail || 'Failed to load item details';
+      console.error('Error loading item details:', error);
+      setError(errorMessage);
+      return null;
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
+  const preloadNextItem = async (currentIndex: number) => {
+    if (currentIndex < items.length - 1) {
+      const nextItemIndex = currentIndex + 1;
+      const nextItem = items[nextItemIndex];
+      console.log('Preloading next item:', nextItem.id, 'at index:', nextItemIndex);
+      
+      try {
+        // Only preload if not already in cache
+        if (!detailsCache[nextItem.id]) {
+          await loadItemDetails(nextItem.id, false);
+          console.log('Successfully preloaded next item:', nextItem.id);
+        } else {
+          console.log('Next item already in cache:', nextItem.id);
+        }
+      } catch (error) {
+        console.error('Error preloading next item:', error);
+      }
+    }
+  };
+
+  const renderReviewMode = () => {
+    const currentItem = items[currentItemIndex];
+    if (!currentItem) return null;
+
+    // Get the correct item to display - either the column or the table
+    // We need to ensure we're using the most up-to-date data from the state
+    let displayItem: MetadataItem;
+    const isColumnView = Boolean(currentItem.currentColumn);
+    
+    console.log('renderReviewMode called with:', {
+      currentItemId: currentItem.id,
+      hasCurrentColumn: Boolean(currentItem.currentColumn),
+      currentColumnIndex
+    });
+    
+    if (isColumnView && currentItem.currentColumn) {
+      // We're viewing a column
+      displayItem = {
+        ...currentItem.currentColumn,
+        // Ensure we have all required properties
+        id: currentItem.currentColumn.id || `${currentItem.id}#column.${currentItem.currentColumn.name.split('.').pop()}`,
+        type: 'column',
+        parentTableId: currentItem.id
+      };
+      console.log('Rendering column view:', displayItem.id);
+    } else {
+      // We're viewing a table
+      displayItem = {
+        ...currentItem,
+        // Ensure currentColumn is null
+        currentColumn: null
+      };
+      console.log('Rendering table view:', displayItem.id);
+    }
+
+    // Add more detailed logging to help with debugging
+    console.log('Display item details:', {
+      id: displayItem.id,
+      type: displayItem.type,
+      isColumnView,
+      hasCurrentColumn: Boolean(currentItem.currentColumn),
+      name: displayItem.name,
+      status: displayItem.status,
+      hasDraftDescription: Boolean(displayItem.draftDescription),
+      hasCurrentDescription: Boolean(displayItem.currentDescription)
+    });
+
+    // Verify that displayItem has the necessary data
+    if (!displayItem.id) {
+      console.error('Invalid displayItem:', displayItem);
+      setError('Display item is missing required data. Please refresh the page.');
+      return null;
+    }
+
+    if (isLoadingDetails) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+
+    // Debug information
+    console.log('Review Mode State:', {
+      currentItemId,
+      displayItemId: displayItem.id,
+      isColumnView,
+      currentColumnIndex,
+      taggedColumnsCount: taggedColumns.length
+    });
+
+    return (
+      <Box>
+        {/* Top Sticky Action Bar */}
+        <Box sx={{ 
+          p: 2, 
+          mb: 2,
+          position: 'sticky',
+          top: 64,
+          zIndex: 1,
+          backgroundColor: 'background.paper',
+          borderBottom: 1,
+          borderColor: 'divider'
+        }}>
+          {renderActionBar(currentItem)}
+        </Box>
+
+        {/* Main Content */}
+        <Box sx={{ pb: 8 }}>
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <Box>
+                <Typography variant="h5" gutterBottom>
+                  {isColumnView ? (
+                    <>
+                      Column: {displayItem.name.split('.').pop()}
+                      <Typography component="span" variant="h5" color="text.secondary" sx={{ ml: 2 }}>
+                        • Table: {displayItem.name.split('#')[0]}
+                      </Typography>
+                    </>
+                  ) : (
+                    displayItem.name
+                  )}
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
                   <Chip
-                    label={item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                    label={displayItem.type.charAt(0).toUpperCase() + displayItem.type.slice(1)}
                     size="small"
-                    color={item.type === 'table' ? 'primary' : 'secondary'}
+                    color={displayItem.type === 'table' ? 'primary' : 'secondary'}
                   />
-                </TableCell>
-                <TableCell>
                   <Chip
-                    label={item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                    label={displayItem.status.charAt(0).toUpperCase() + displayItem.status.slice(1)}
                     size="small"
-                    color={getStatusColor(item.status)}
+                    color={getStatusColor(displayItem.status)}
                   />
-                </TableCell>
-                <TableCell>
-                  {item['to-be-regenerated'] && (
+                  {(displayItem.toBeRegenerated || displayItem['to-be-regenerated'] || displayItem.metadata?.to_be_regenerated) && (
                     <Chip
                       label="Marked for Regeneration"
                       size="small"
@@ -684,306 +1566,199 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
                       icon={<AutorenewIcon />}
                     />
                   )}
-                </TableCell>
-                <TableCell>
-                  {new Date(item.lastModified).toLocaleString()}
-                </TableCell>
-                <TableCell align="right">
-                  <Box onClick={(e) => e.stopPropagation()}>
-                    <IconButton
-                      onClick={() => handleViewDetails(item.id)}
-                      size="small"
-                      sx={{ mr: 1 }}
-                    >
-                      <VisibilityIcon />
-                    </IconButton>
-                    <IconButton
-                      onClick={() => handleMarkForRegeneration(item.id)}
-                      size="small"
-                      disabled={item['to-be-regenerated'] || item.isMarkingForRegeneration}
-                    >
-                      <AutorenewIcon sx={{ 
-                        animation: item.isMarkingForRegeneration ? 'spin 1s linear infinite' : 'none',
-                        '@keyframes spin': {
-                          '0%': { transform: 'rotate(0deg)' },
-                          '100%': { transform: 'rotate(360deg)' }
-                        }
-                      }} />
-                    </IconButton>
-                  </Box>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Box>
-  );
-
-  const renderActionBar = (currentItem: MetadataItem) => (
-    <Box sx={{ 
-      display: 'flex', 
-      justifyContent: 'space-between', 
-      alignItems: 'center',
-      backgroundColor: 'background.paper',
-      p: 2,
-      borderRadius: 1,
-      boxShadow: 1
-    }}>
-      <Box>
-        <Button
-          variant="contained"
-          onClick={() => handleAccept(currentItem)}
-          disabled={currentItem.status === 'accepted' || isAccepting[currentItem.id]}
-          startIcon={<CheckCircleIcon sx={{ 
-            animation: isAccepting[currentItem.id] ? 'spin 1s linear infinite' : 'none',
-            '@keyframes spin': {
-              '0%': { transform: 'rotate(0deg)' },
-              '100%': { transform: 'rotate(360deg)' }
-            }
-          }} />}
-          sx={{ mr: 1 }}
-        >
-          {isAccepting[currentItem.id] ? 'Accepting...' : 'Accept'}
-        </Button>
-        <Button
-          variant="contained"
-          onClick={() => handleMarkForRegeneration(currentItem.id)}
-          startIcon={<AutorenewIcon sx={{ 
-            animation: currentItem.isMarkingForRegeneration ? 'spin 1s linear infinite' : 'none',
-            '@keyframes spin': {
-              '0%': { transform: 'rotate(0deg)' },
-              '100%': { transform: 'rotate(360deg)' }
-            }
-          }} />}
-          disabled={currentItem['to-be-regenerated'] || currentItem.isMarkingForRegeneration}
-          sx={{ mr: 1 }}
-        >
-          {currentItem.isMarkingForRegeneration 
-            ? 'Marking...' 
-            : currentItem['to-be-regenerated'] 
-              ? 'Marked for Regeneration' 
-              : 'Mark for Regeneration'}
-        </Button>
-        <Button
-          variant="contained"
-          onClick={() => handleEditInReview(currentItem)}
-          startIcon={<EditIcon />}
-        >
-          Edit
-        </Button>
-      </Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Typography variant="body2" color="text.secondary">
-          {currentItemIndex + 1} of {items.length}
-        </Typography>
-        <Button
-          variant="outlined"
-          onClick={handlePrevious}
-          disabled={currentItemIndex === 0}
-          startIcon={<NavigateBeforeIcon />}
-        >
-          Previous
-        </Button>
-        <Button
-          variant="outlined"
-          onClick={handleNext}
-          disabled={currentItemIndex === items.length - 1}
-          endIcon={<NavigateNextIcon />}
-        >
-          Next
-        </Button>
-      </Box>
-    </Box>
-  );
-
-  const renderReviewMode = () => {
-    const currentItem = items[currentItemIndex];
-    if (!currentItem) return null;
-
-    console.log('Rendering review mode for item:', currentItem);
-
-    // Add loading indicator while details are being fetched
-    if (isLoadingDetails) {
-      return (
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
-          <CircularProgress />
-        </Box>
-      );
-    }
-
-    return (
-      <Box>
-        {/* Top Sticky Action Bar */}
-        <Box sx={{ 
-          p: 2, 
-          mb: 2,
-          position: 'sticky',
-          top: 64, // Height of the top navigation bar
-          zIndex: 1,
-          backgroundColor: 'background.paper',
-          borderBottom: 1,
-          borderColor: 'divider'
-        }}>
-          {renderActionBar(currentItem)}
-        </Box>
-
-        {/* Main Content */}
-        <Box sx={{ pb: 8 }}> {/* Add padding at bottom to prevent content from being hidden behind bottom bar */}
-          <Paper sx={{ p: 2, mb: 2 }}>
-            <Box>
-              <Typography variant="h5" gutterBottom>
-                {currentItem.name}
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Chip
-                  label={currentItem.type.charAt(0).toUpperCase() + currentItem.type.slice(1)}
-                  size="small"
-                  color={currentItem.type === 'table' ? 'primary' : 'secondary'}
-                />
-                <Chip
-                  label={currentItem.status.charAt(0).toUpperCase() + currentItem.status.slice(1)}
-                  size="small"
-                  color={getStatusColor(currentItem.status)}
-                />
-                {currentItem['to-be-regenerated'] && (
-                  <Chip
-                    label="Marked for Regeneration"
-                    size="small"
-                    sx={{
-                      backgroundColor: 'warning.main',
-                      color: 'warning.contrastText'
-                    }}
-                    icon={<AutorenewIcon />}
-                  />
-                )}
-                <Typography variant="body2" color="text.secondary">
-                  Last modified: {new Date(currentItem.lastModified).toLocaleString()}
-                </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Last modified: {new Date(displayItem.lastModified).toLocaleString()}
+                  </Typography>
+                </Box>
               </Box>
             </Box>
+
+            {/* Remove the column navigation bar and context bar since we're showing column info in the header */}
+            {/* Tags Section */}
+            {displayItem.tags && Object.keys(displayItem.tags).length > 0 && (
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6" gutterBottom>
+                  Tags
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {Object.entries(displayItem.tags).map(([key, value]) => (
+                    <Chip
+                      key={key}
+                      label={`${key}: ${value}`}
+                      variant="outlined"
+                      sx={{ maxWidth: 200 }}
+                    />
+                  ))}
+                </Box>
+              </Box>
+            )}
           </Paper>
 
           <Grid container spacing={2}>
             <Grid item xs={12}>
-              <Box sx={{ mb: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={showDiff}
-                        onChange={(e) => setShowDiff(e.target.checked)}
-                      />
-                    }
-                    label={showDiff ? "Showing Diff View" : "Showing Both Versions"}
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">Description Changes</Typography>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={showDiff}
+                      onChange={(e) => setShowDiff(e.target.checked)}
+                    />
+                  }
+                  label={showDiff ? "Showing Diff View" : "Showing Side by Side"}
+                />
+              </Box>
+              {showDiff ? (
+                <Box sx={{ 
+                  minHeight: '400px',
+                  '& .diff-viewer': {
+                    width: '100%',
+                    minHeight: '400px'
+                  },
+                  '& .diff-container': {
+                    margin: 0,
+                    padding: '16px'
+                  },
+                  '& .diff-title-header': {
+                    padding: '8px 16px',
+                    background: '#f5f5f5',
+                  }
+                }}>
+                  <ReactDiffViewer
+                    oldValue={displayItem.currentDescription || ''}
+                    newValue={displayItem.draftDescription || ''}
+                    splitView={true}
+                    leftTitle="Current Version"
+                    rightTitle="Draft Version"
+                    compareMethod={DiffMethod.WORDS}
+                    styles={{
+                      variables: {
+                        light: {
+                          diffViewerBackground: '#f8f9fa',
+                          diffViewerColor: '#212529',
+                          addedBackground: '#e6ffec',
+                          addedColor: '#24292f',
+                          removedBackground: '#ffebe9',
+                          removedColor: '#24292f',
+                          wordAddedBackground: '#abf2bc',
+                          wordRemovedBackground: '#fdb8c0',
+                        }
+                      }
+                    }}
                   />
                 </Box>
-              </Box>
-            </Grid>
-
-            {showDiff ? (
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Box sx={{ 
-                      minHeight: '400px',
-                      '& .diff-viewer': {
-                        width: '100%',
-                        minHeight: '400px'
-                      },
-                      '& .diff-container': {
-                        margin: 0,
-                        padding: '16px'
-                      },
-                      '& .diff-title-header': {
-                        padding: '8px 16px',
-                        background: '#f5f5f5',
-                      }
-                    }}>
-                      <ReactDiffViewer
-                        oldValue={currentItem.currentDescription}
-                        newValue={currentItem.draftDescription}
-                        splitView={true}
-                        leftTitle="Current Version"
-                        rightTitle="Draft Version"
-                        compareMethod={DiffMethod.WORDS}
-                      />
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ) : (
-              <>
-                <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        Current Description
-                      </Typography>
-                      {renderDescription(currentItem.currentDescription, currentItem.isHtml)}
-                    </CardContent>
-                  </Card>
+              ) : (
+                <Grid container spacing={2}>
+                  <Grid item xs={6}>
+                    <Typography variant="h6" gutterBottom>Current Version</Typography>
+                    <Paper sx={{ p: 2, minHeight: '200px' }}>
+                      {displayItem.isHtml ? (
+                        <div dangerouslySetInnerHTML={{ __html: displayItem.currentDescription || 'No description available' }} />
+                      ) : (
+                        <Typography>{displayItem.currentDescription || 'No description available'}</Typography>
+                      )}
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="h6" gutterBottom>Draft Version</Typography>
+                    <Paper sx={{ p: 2, minHeight: '200px', bgcolor: displayItem.currentDescription !== displayItem.draftDescription ? 'rgba(200, 250, 205, 0.15)' : undefined }}>
+                      {displayItem.isHtml ? (
+                        <div dangerouslySetInnerHTML={{ __html: displayItem.draftDescription || 'No draft description available' }} />
+                      ) : (
+                        <Typography>{displayItem.draftDescription || 'No draft description available'}</Typography>
+                      )}
+                    </Paper>
+                  </Grid>
                 </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        Draft Description
-                      </Typography>
-                      {renderDescription(currentItem.draftDescription, currentItem.isHtml)}
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </>
-            )}
-
-            <Grid item xs={12}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    Comments
-                  </Typography>
-                  {renderComments(currentItem.comments)}
-                  <Box sx={{ mt: 2 }}>
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={3}
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      placeholder="Add a comment..."
-                    />
-                    <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
-                      <Button
-                        variant="contained"
-                        onClick={() => handleAddComment(currentItem.id)}
-                        disabled={!newComment.trim()}
-                      >
-                        Add Comment
-                      </Button>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
+              )}
             </Grid>
           </Grid>
-        </Box>
 
-        {/* Bottom Sticky Action Bar */}
-        <Box sx={{ 
-          p: 2,
-          position: 'fixed',
-          bottom: 0,
-          left: 240, // Width of the left menu
-          right: 0,
-          zIndex: 1,
-          backgroundColor: 'background.paper',
-          borderTop: 1,
-          borderColor: 'divider',
-          boxShadow: '0px -2px 4px rgba(0, 0, 0, 0.05)'
-        }}>
-          {renderActionBar(currentItem)}
+          {/* Comments Section */}
+          <Card sx={{ mt: 2 }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Comments
+              </Typography>
+              {renderComments(displayItem.comments)}
+              <Box sx={{ mt: 2 }}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  variant="outlined"
+                  placeholder="Add a comment..."
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleAddComment(displayItem.id);
+                    }
+                  }}
+                />
+                <Button
+                  variant="contained"
+                  onClick={() => handleAddComment(displayItem.id)}
+                  disabled={!newComment.trim()}
+                  sx={{ mt: 1 }}
+                >
+                  Add Comment
+                </Button>
+              </Box>
+            </CardContent>
+          </Card>
+
+          {/* DEBUG Section - Remove before production */}
+          <Card sx={{ mt: 2, bgcolor: 'grey.100' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" color="error">
+                  DEBUG INFO - Remove before production
+                </Typography>
+                <Chip label="DEBUG" color="error" />
+              </Box>
+              <Grid container spacing={2}>
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" gutterBottom>Raw Item Data:</Typography>
+                  <Paper sx={{ p: 2, bgcolor: 'background.paper' }}>
+                    <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {JSON.stringify({
+                        id: displayItem.id,
+                        type: displayItem.type,
+                        metadata: displayItem.metadata,
+                        tags: displayItem.tags,
+                        toBeRegenerated: displayItem.toBeRegenerated,
+                        'to-be-regenerated': displayItem['to-be-regenerated'],
+                        status: displayItem.status,
+                        draftDescription: Boolean(displayItem.draftDescription),
+                        currentDescription: Boolean(displayItem.currentDescription),
+                      }, null, 2)}
+                    </pre>
+                  </Paper>
+                </Grid>
+                {displayItem.type === 'column' && (
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" gutterBottom>Column-specific Debug Info:</Typography>
+                    <Paper sx={{ p: 2, bgcolor: 'background.paper' }}>
+                      <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {JSON.stringify({
+                          profile: displayItem.profile,
+                          metadata: {
+                            certified: displayItem.metadata?.certified,
+                            user_who_certified: displayItem.metadata?.user_who_certified,
+                            generation_date: displayItem.metadata?.generation_date,
+                            to_be_regenerated: displayItem.metadata?.to_be_regenerated,
+                            external_document_uri: displayItem.metadata?.external_document_uri
+                          }
+                        }, null, 2)}
+                      </pre>
+                    </Paper>
+                  </Grid>
+                )}
+              </Grid>
+            </CardContent>
+          </Card>
         </Box>
       </Box>
     );
@@ -992,9 +1767,31 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   const handleEditorChange = (content: string) => {
     if (editItem) {
       setEditItem((prev) =>
-        prev ? { ...prev, draftDescription: content, isHtml: isRichText } : null
+        prev ? { 
+          ...prev, 
+          draftDescription: content, 
+          isHtml: isRichText 
+        } : null
       );
     }
+  };
+
+  const handleRichTextToggle = (toRichText: boolean) => {
+    const description = editItem?.draftDescription;
+    if (!description) {
+      setIsRichText(toRichText);
+      return;
+    }
+    
+    const content = toRichText
+      ? description
+          .split('\n')
+          .map(line => `<p>${line}</p>`)
+          .join('')
+      : description.replace(/<[^>]*>/g, '');
+    
+    handleEditorChange(content);
+    setIsRichText(toRichText);
   };
 
   const fetchReviewItems = async (nextPageToken?: string) => {
@@ -1058,106 +1855,35 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     }
   };
 
-  const loadItemDetails = async (itemId: string, setLoading = true) => {
-    try {
-      if (setLoading) {
-        setIsLoadingDetails(true);
-      }
-      setError(null);
-
-      // Use cache if available and not explicitly refreshing
-      if (detailsCache[itemId] && !setLoading) {
-        console.log('Using cached item details:', detailsCache[itemId]);
-        // Update the item in the state with cached details to ensure consistency
-        dispatch({
-          type: 'UPDATE_ITEM',
-          payload: {
-            id: itemId,
-            updates: detailsCache[itemId]
-          }
-        });
-        return detailsCache[itemId];
-      }
-
-      const [projectId, datasetId, tableId] = itemId.split('#')[0].split('.');
-      const isColumn = itemId.includes('#column.');
-      const columnName = isColumn ? itemId.split('#column.')[1] : undefined;
-
-      console.log(`${setLoading ? 'Fetching' : 'Preloading'} details for item:`, itemId);
-      const response = await axios.post(`${apiUrlBase}/metadata/review/details`, {
-        client_settings: {
-          project_id: config.project_id,
-          llm_location: config.llm_location,
-          dataplex_location: config.dataplex_location,
-        },
-        table_settings: {
-          project_id: projectId,
-          dataset_id: datasetId,
-          table_id: tableId,
-        },
-        column_name: columnName
+  // Add a debugging function
+  const logDebugInfo = () => {
+    const currentItem = items[currentItemIndex];
+    console.group('ReviewPage Debug Information');
+    console.log('Current State:', {
+      viewMode,
+      currentItemIndex,
+      currentItemId,
+      isColumnView: Boolean(currentItem?.currentColumn),
+      taggedColumnsCount: taggedColumns.length,
+      currentColumnIndex
+    });
+    
+    if (currentItem) {
+      console.log('Current Item:', {
+        id: currentItem.id,
+        type: currentItem.type,
+        name: currentItem.name,
+        hasCurrentColumn: Boolean(currentItem.currentColumn),
+        currentColumnId: currentItem.currentColumn?.id
       });
-
-      // Response is no longer wrapped in a data field
-      const details = response.data;
-      console.log(`${setLoading ? 'Received' : 'Preloaded'} item details:`, details);
-
-      // Use the regeneration status from the API response
-      const updatedDetails = {
-        ...details,
-        'to-be-regenerated': details.markedForRegeneration,
-        lastModified: details.lastModified || new Date().toISOString()
-      };
-
-      // Update the item in the state with the new details
-      dispatch({
-        type: 'UPDATE_ITEM',
-        payload: {
-          id: itemId,
-          updates: updatedDetails
-        }
-      });
-
-      // Update cache
-      setDetailsCache({
-        ...detailsCache,
-        [itemId]: updatedDetails
-      });
-
-      return updatedDetails;
-
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to load item details';
-      if (setLoading) {
-        // Only show errors to the user for active loading, not preloading
-        console.error('Error loading item details:', error);
-        setError(errorMessage);
-      } else {
-        console.warn('Error preloading item details:', errorMessage);
-      }
-      return null;
-    } finally {
-      if (setLoading) {
-        setIsLoadingDetails(false);
-      }
     }
-  };
-
-  // Function to preload next item
-  const preloadNextItem = async (currentIndex: number) => {
-    if (currentIndex < items.length - 1) {
-      const nextItemIndex = currentIndex + 1;
-      const nextItem = items[nextItemIndex];
-      console.log('Preloading next item:', nextItem.id, 'at index:', nextItemIndex);
-      
-      try {
-        // Always load the next item's details, don't rely on cache for preloading
-        await loadItemDetails(nextItem.id, false);
-        console.log('Successfully preloaded next item:', nextItem.id);
-      } catch (error) {
-        console.error('Error preloading next item:', error);
-      }
-    }
+    
+    console.log('Redux State:', state);
+    console.log('Cache State:', {
+      cacheKeys: Object.keys(detailsCache),
+      currentItemInCache: currentItem ? Boolean(detailsCache[currentItem.id]) : false
+    });
+    console.groupEnd();
   };
 
   return (
@@ -1248,9 +1974,10 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
                 size="small"
                 variant={isRichText ? "text" : "contained"}
                 onClick={() => {
-                  if (isRichText && editItem) {
+                  const description = editItem?.draftDescription;
+                  if (isRichText && description) {
                     // Convert HTML to plain text
-                    const plainText = editItem.draftDescription.replace(/<[^>]*>/g, '');
+                    const plainText = description.replace(/<[^>]*>/g, '');
                     handleEditorChange(plainText);
                   }
                   setIsRichText(false);
@@ -1263,9 +1990,10 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
                 size="small"
                 variant={isRichText ? "contained" : "text"}
                 onClick={() => {
-                  if (!isRichText && editItem) {
+                  const description = editItem?.draftDescription;
+                  if (!isRichText && description) {
                     // Convert plain text to basic HTML
-                    const htmlContent = editItem.draftDescription
+                    const htmlContent = description
                       .split('\n')
                       .map(line => `<p>${line}</p>`)
                       .join('');

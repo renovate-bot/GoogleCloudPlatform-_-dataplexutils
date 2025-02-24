@@ -1,20 +1,45 @@
 import React, { createContext, useContext, useReducer } from 'react';
 
-interface MetadataItem {
+export interface MetadataItem {
   id: string;
   type: 'table' | 'column';
   name: string;
-  currentDescription: string;
-  draftDescription: string;
-  isHtml: boolean;
-  status: 'draft' | 'accepted' | 'rejected';
+  status: 'draft' | 'accepted' | 'rejected' | 'current';
+  currentDescription?: string;
+  draftDescription?: string;
+  whenAccepted?: string;
   lastModified: string;
-  comments: string[];
+  comments?: string[];
+  tags?: Record<string, string>;
+  metadata?: {
+    certified?: boolean;
+    user_who_certified?: string;
+    generation_date?: string;
+    to_be_regenerated?: boolean;
+    external_document_uri?: string;
+  };
+  profile?: {
+    name?: string;
+    type?: string;
+    mode?: string;
+    null_ratio?: number;
+    distinct_ratio?: number;
+    average?: number;
+    std_dev?: number;
+    min?: number | string;
+    max?: number | string;
+    quartiles?: number[];
+    min_length?: number;
+    max_length?: number;
+    avg_length?: number;
+  };
+  externalDocumentUri?: string;
+  toBeRegenerated?: boolean;
   'to-be-regenerated'?: boolean;
   isMarkingForRegeneration?: boolean;
-  generationDate?: string;
-  whenAccepted?: string;
-  externalDocumentUri?: string;
+  parentTableId?: string;
+  isHtml?: boolean;
+  currentColumn?: MetadataItem | null;
 }
 
 interface ReviewState {
@@ -109,4 +134,4 @@ export const useReview = () => {
   return context;
 };
 
-export type { MetadataItem, ReviewState, ReviewAction }; 
+export type { ReviewState, ReviewAction }; 

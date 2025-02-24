@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -30,16 +30,16 @@ import {
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import StarIcon from '@mui/icons-material/Star';
-import StarBorderIcon from '@mui/icons-material/StarBorder';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import InfoIcon from '@mui/icons-material/Info';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import StorageIcon from '@mui/icons-material/Storage';
 import VerifiedIcon from '@mui/icons-material/Verified';
-import DomainIcon from '@mui/icons-material/Domain';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { useNavigate } from 'react-router-dom';
+import { useCache } from '../../contexts/CacheContext';
 
 interface DataProduct {
   id: string;
@@ -58,14 +58,19 @@ interface DataProduct {
   lastUpdated: string;
   status: 'healthy' | 'warning' | 'critical';
   trend: 'up' | 'down' | 'stable';
+  details?: any; // Add details field to track if details are loaded
 }
 
 const DataProductEvaluation: React.FC = () => {
   const navigate = useNavigate();
+  const { detailsCache, setDetailsCache } = useCache();
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [selectedDomain, setSelectedDomain] = useState<string>('all');
+  const [dataProducts, setDataProducts] = useState<DataProduct[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [currentTableIndex, setCurrentTableIndex] = useState<number>(-1);
 
   // Mock domains data
   const domains = [
@@ -77,84 +82,195 @@ const DataProductEvaluation: React.FC = () => {
     'Product'
   ];
 
-  // Mock data for demonstration
-  const allDataProducts: DataProduct[] = [
-    {
-      id: '1',
-      name: 'Customer Analytics Dataset',
-      type: 'BigQuery Table',
-      owner: 'Analytics Team',
-      domain: 'Marketing',
-      ratings: {
-        dataQuality: 4.5,
-        latency: 5,
-        reliability: 4.8,
-        completeness: 4.2,
-        freshness: 4.7
-      },
-      slaViolations: 0,
-      lastUpdated: '2024-03-10 15:30',
-      status: 'healthy',
-      trend: 'up'
-    },
-    {
-      id: '2',
-      name: 'Sales Transactions',
-      type: 'BigQuery Table',
-      owner: 'Sales Team',
-      domain: 'Sales',
-      ratings: {
-        dataQuality: 3.8,
-        latency: 3.5,
-        reliability: 4.0,
-        completeness: 3.9,
-        freshness: 3.5
-      },
-      slaViolations: 2,
-      lastUpdated: '2024-03-10 14:45',
-      status: 'warning',
-      trend: 'down'
-    },
-    {
-      id: '3',
-      name: 'Product Inventory',
-      type: 'BigQuery View',
-      owner: 'Product Team',
-      domain: 'Product',
-      ratings: {
-        dataQuality: 4.2,
-        latency: 4.5,
-        reliability: 4.3,
-        completeness: 4.0,
-        freshness: 4.1
-      },
-      slaViolations: 1,
-      lastUpdated: '2024-03-10 13:15',
-      status: 'healthy',
-      trend: 'stable'
-    },
-    {
-      id: '4',
-      name: 'Financial Reports',
-      type: 'BigQuery Table',
-      owner: 'Finance Team',
-      domain: 'Finance',
-      ratings: {
-        dataQuality: 4.7,
-        latency: 4.2,
-        reliability: 4.9,
-        completeness: 4.8,
-        freshness: 4.5
-      },
-      slaViolations: 0,
-      lastUpdated: '2024-03-10 12:30',
-      status: 'healthy',
-      trend: 'up'
+  // Simulate loading table details from an API
+  const loadTableDetails = async (productId: string) => {
+    console.log('Loading details for table:', productId);
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // In a real app, this would be actual API data
+    return {
+      details: {
+        schema: ['id', 'name', 'value'],
+        rowCount: Math.floor(Math.random() * 1000000),
+        lastModified: new Date().toISOString(),
+        description: `Detailed information for table ${productId}`,
+        additionalMetrics: {
+          avgProcessingTime: Math.random() * 100,
+          dataAccuracy: Math.random() * 100,
+        }
+      }
+    };
+  };
+
+  // Preload next table details
+  const preloadNextTable = async (currentIndex: number) => {
+    if (currentIndex < dataProducts.length - 1) {
+      const nextProduct = dataProducts[currentIndex + 1];
+      const nextTableKey = `table_${nextProduct.id}`;
+      
+      // Only preload if not already in cache
+      if (!detailsCache[nextTableKey]?.details) {
+        console.log('Preloading next table details:', nextProduct.id);
+        try {
+          const details = await loadTableDetails(nextProduct.id);
+          
+          // Update cache with the loaded details
+          setDetailsCache(prevCache => ({
+            ...prevCache,
+            [nextTableKey]: {
+              ...nextProduct,
+              ...details
+            }
+          }));
+          
+          // If there's another table after this one, preload it too
+          if (currentIndex + 1 < dataProducts.length - 1) {
+            const nextNextProduct = dataProducts[currentIndex + 2];
+            const nextNextTableKey = `table_${nextNextProduct.id}`;
+            
+            if (!detailsCache[nextNextTableKey]?.details) {
+              console.log('Preloading next+1 table details:', nextNextProduct.id);
+              const nextNextDetails = await loadTableDetails(nextNextProduct.id);
+              setDetailsCache(prevCache => ({
+                ...prevCache,
+                [nextNextTableKey]: {
+                  ...nextNextProduct,
+                  ...nextNextDetails
+                }
+              }));
+            }
+          }
+        } catch (error) {
+          console.error('Error preloading table details:', error);
+        }
+      }
     }
-  ];
+  };
+
+  // Load data products from cache or initialize with mock data
+  useEffect(() => {
+    const loadInitialData = () => {
+      const cachedProducts = detailsCache['dataProducts'];
+      const cachedTableDetails = Object.keys(detailsCache)
+        .filter(key => key.startsWith('table_'))
+        .map(key => detailsCache[key]);
+
+      if (cachedProducts) {
+        // Create a map of cached details for faster lookup
+        const cachedDetailsMap = cachedTableDetails.reduce((acc, table) => {
+          acc[table.id] = table;
+          return acc;
+        }, {} as Record<string, any>);
+
+        // Merge cached products with table details
+        const mergedProducts = cachedProducts.map(product => {
+          const cachedDetails = cachedDetailsMap[product.id];
+          return cachedDetails ? { ...product, ...cachedDetails } : product;
+        });
+        setDataProducts(mergedProducts);
+
+        // If we have a current table, preload the next one
+        if (currentTableIndex >= 0) {
+          preloadNextTable(currentTableIndex);
+        }
+      } else {
+        // Mock data for demonstration
+        const initialProducts = [
+          {
+            id: '1',
+            name: 'Customer Analytics Dataset',
+            type: 'BigQuery Table',
+            owner: 'Analytics Team',
+            domain: 'Marketing',
+            ratings: {
+              dataQuality: 4.5,
+              latency: 5,
+              reliability: 4.8,
+              completeness: 4.2,
+              freshness: 4.7
+            },
+            slaViolations: 0,
+            lastUpdated: '2024-03-10 15:30',
+            status: 'healthy',
+            trend: 'up'
+          },
+          {
+            id: '2',
+            name: 'Sales Transactions',
+            type: 'BigQuery Table',
+            owner: 'Sales Team',
+            domain: 'Sales',
+            ratings: {
+              dataQuality: 3.8,
+              latency: 3.5,
+              reliability: 4.0,
+              completeness: 3.9,
+              freshness: 3.5
+            },
+            slaViolations: 2,
+            lastUpdated: '2024-03-10 14:45',
+            status: 'warning',
+            trend: 'down'
+          },
+          {
+            id: '3',
+            name: 'Product Inventory',
+            type: 'BigQuery View',
+            owner: 'Product Team',
+            domain: 'Product',
+            ratings: {
+              dataQuality: 4.2,
+              latency: 4.5,
+              reliability: 4.3,
+              completeness: 4.0,
+              freshness: 4.1
+            },
+            slaViolations: 1,
+            lastUpdated: '2024-03-10 13:15',
+            status: 'healthy',
+            trend: 'stable'
+          },
+          {
+            id: '4',
+            name: 'Financial Reports',
+            type: 'BigQuery Table',
+            owner: 'Finance Team',
+            domain: 'Finance',
+            ratings: {
+              dataQuality: 4.7,
+              latency: 4.2,
+              reliability: 4.9,
+              completeness: 4.8,
+              freshness: 4.5
+            },
+            slaViolations: 0,
+            lastUpdated: '2024-03-10 12:30',
+            status: 'healthy',
+            trend: 'up'
+          }
+        ] as DataProduct[];
+
+        setDataProducts(initialProducts);
+        // Cache both the full list and individual table details
+        const tableDetailsCache = initialProducts.reduce((acc, product) => ({
+          ...acc,
+          [`table_${product.id}`]: product
+        }), {});
+
+        setDetailsCache({
+          ...detailsCache,
+          dataProducts: initialProducts,
+          ...tableDetailsCache
+        });
+      }
+    };
+
+    loadInitialData();
+  }, [detailsCache, setDetailsCache, currentTableIndex]);
 
   // Filter data products based on selected domain and search query
-  const filteredDataProducts = allDataProducts.filter(product => {
+  const filteredDataProducts = dataProducts.filter(product => {
     const matchesDomain = selectedDomain === 'all' || product.domain === selectedDomain;
     const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          product.domain.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -207,8 +323,125 @@ const DataProductEvaluation: React.FC = () => {
     setPage(0);
   };
 
-  const handleRowClick = (productId: string) => {
+  const handleRowClick = async (productId: string) => {
+    const currentIndex = dataProducts.findIndex(p => p.id === productId);
+    setCurrentTableIndex(currentIndex);
+
+    const tableKey = `table_${productId}`;
+    
+    try {
+      // Check if we need to load the details
+      if (!detailsCache[tableKey]?.details) {
+        // Load details for the current table
+        const details = await loadTableDetails(productId);
+        
+        // Update cache with the loaded details
+        setDetailsCache(prevCache => ({
+          ...prevCache,
+          [tableKey]: {
+            ...dataProducts[currentIndex],
+            ...details
+          }
+        }));
+
+        // After loading current table details, preload next table in background
+        if (currentIndex < dataProducts.length - 1) {
+          const nextProduct = dataProducts[currentIndex + 1];
+          const nextTableKey = `table_${nextProduct.id}`;
+          
+          // Only preload if not already in cache
+          if (!detailsCache[nextTableKey]?.details) {
+            console.log('Preloading next table details:', nextProduct.id);
+            try {
+              const nextDetails = await loadTableDetails(nextProduct.id);
+              setDetailsCache(prevCache => ({
+                ...prevCache,
+                [nextTableKey]: {
+                  ...nextProduct,
+                  ...nextDetails
+                }
+              }));
+            } catch (error) {
+              console.error('Error preloading next table details:', error);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading table details:', error);
+    }
+    
+    // Navigate to the details page
     navigate(`/contracts/diagnostics/${productId}`);
+  };
+
+  // Load table details from cache when returning to the page
+  useEffect(() => {
+    const loadCachedTableDetails = () => {
+      const cachedTableDetails = Object.keys(detailsCache)
+        .filter(key => key.startsWith('table_'))
+        .map(key => detailsCache[key])
+        .filter(details => details?.details); // Only include entries with loaded details
+      
+      if (cachedTableDetails.length > 0) {
+        setDataProducts(prevProducts => {
+          // Create a map of cached details for faster lookup
+          const cachedDetailsMap = cachedTableDetails.reduce((acc, table) => {
+            acc[table.id] = table;
+            return acc;
+          }, {} as Record<string, any>);
+
+          // Update products with cached details
+          return prevProducts.map(product => {
+            const cachedDetails = cachedDetailsMap[product.id];
+            return cachedDetails ? { ...product, ...cachedDetails } : product;
+          });
+        });
+      }
+    };
+
+    loadCachedTableDetails();
+  }, [detailsCache]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // In a real application, you would fetch fresh data from the API here
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const refreshedProducts = await Promise.all(dataProducts.map(async product => {
+        // For each product, also refresh its details if they were loaded before
+        const tableKey = `table_${product.id}`;
+        if (detailsCache[tableKey]?.details) {
+          const details = await loadTableDetails(product.id);
+          return {
+            ...product,
+            lastUpdated: new Date().toISOString(),
+            ...details
+          };
+        }
+        return {
+          ...product,
+          lastUpdated: new Date().toISOString()
+        };
+      }));
+      
+      setDataProducts(refreshedProducts);
+
+      // Update both the full list cache and individual table details cache
+      const tableDetailsCache = refreshedProducts.reduce((acc, product) => ({
+        ...acc,
+        [`table_${product.id}`]: product
+      }), {});
+
+      setDetailsCache({
+        ...detailsCache,
+        dataProducts: refreshedProducts,
+        ...tableDetailsCache
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   return (
@@ -228,11 +461,27 @@ const DataProductEvaluation: React.FC = () => {
         <Typography color="text.primary">Evaluation</Typography>
       </Breadcrumbs>
 
-      {/* Header with Search and Domain Filter */}
+      {/* Header with Search, Domain Filter, and Refresh */}
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Data Product Evaluation
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h4" component="h1">
+            Data Product Evaluation
+          </Typography>
+          <Button
+            variant="contained"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            startIcon={<RefreshIcon sx={{ 
+              animation: isRefreshing ? 'spin 1s linear infinite' : 'none',
+              '@keyframes spin': {
+                '0%': { transform: 'rotate(0deg)' },
+                '100%': { transform: 'rotate(360deg)' }
+              }
+            }} />}
+          >
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+        </Box>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={6}>
             <TextField
@@ -251,20 +500,15 @@ const DataProductEvaluation: React.FC = () => {
             />
           </Grid>
           <Grid item xs={12} md={6}>
-            <FormControl fullWidth variant="outlined">
+            <FormControl fullWidth>
               <InputLabel>Domain</InputLabel>
               <Select
                 value={selectedDomain}
-                onChange={(e) => setSelectedDomain(e.target.value)}
                 label="Domain"
-                startAdornment={
-                  <InputAdornment position="start">
-                    <DomainIcon />
-                  </InputAdornment>
-                }
+                onChange={(e) => setSelectedDomain(e.target.value)}
               >
                 <MenuItem value="all">All Domains</MenuItem>
-                {domains.map(domain => (
+                {domains.map((domain) => (
                   <MenuItem key={domain} value={domain}>{domain}</MenuItem>
                 ))}
               </Select>
