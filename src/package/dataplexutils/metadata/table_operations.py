@@ -85,9 +85,11 @@ class TableOperations:
 
             if self._client._client_options._regenerate:
                 tables = self._list_tables_in_dataset_for_regeneration(dataset_fqn)
+                logger.debug(f"Tables to regenerate: {tables}")
             else:
                 tables = self._list_tables_in_dataset(dataset_fqn)
-            
+                logger.debug(f"Tables to generate: {tables}")
+                
             if int_strategy == constants["GENERATION_STRATEGY"]["DOCUMENTED"]:
                 tables_from_uri = self._get_tables_from_uri(documentation_csv_uri)
                 if not self._client._client_options._regenerate:

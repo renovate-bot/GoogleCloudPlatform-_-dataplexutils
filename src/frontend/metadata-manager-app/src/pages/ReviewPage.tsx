@@ -626,7 +626,72 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       }
       
       dispatch({ type: 'SET_CURRENT_INDEX', payload: currentItemIndex - 1 });
-      loadItemDetails(prevItem.id);
+      
+      // Only load details if not already in cache
+      if (!detailsCache[prevItem.id]) {
+        console.log('Loading details for previous item:', prevItem.id);
+        loadItemDetails(prevItem.id);
+      } else {
+        console.log('Using cached data for previous item:', prevItem.id);
+        const cachedDetails = detailsCache[prevItem.id];
+        
+        // For columns, handle column-specific logic
+        if (prevItem.id.includes('#column.')) {
+          const columnDetails = {
+            ...cachedDetails,
+            id: prevItem.id,
+            type: 'column',
+            comments: cachedDetails.comments || [],
+            currentDescription: cachedDetails.currentDescription || '',
+            draftDescription: cachedDetails.draftDescription || '',
+            status: cachedDetails.status || 'draft'
+          };
+          
+          dispatch({
+            type: 'UPDATE_ITEM',
+            payload: {
+              id: prevItem.id,
+              updates: columnDetails
+            }
+          });
+          
+          // Update column navigation state
+          const tableId = prevItem.id.split('#')[0];
+          if (detailsCache[tableId]?.columns) {
+            const columnsWithMetadata = detailsCache[tableId].columns.filter((col: any) => 
+              col.draftDescription || col.currentDescription || 
+              (col.metadata && Object.keys(col.metadata).length > 0)
+            );
+            setTaggedColumns(columnsWithMetadata);
+            const columnName = prevItem.id.split('#column.')[1];
+            const columnIndex = columnsWithMetadata.findIndex(col => col.name.endsWith(columnName));
+            if (columnIndex !== -1) {
+              setCurrentColumnIndex(columnIndex);
+            }
+          }
+        } else {
+          // For tables, update table details and column navigation state
+          const updatedDetails = { ...cachedDetails, currentColumn: null };
+          
+          dispatch({
+            type: 'UPDATE_ITEM',
+            payload: {
+              id: prevItem.id,
+              updates: updatedDetails
+            }
+          });
+          
+          // Update column navigation state for tables
+          if (cachedDetails.columns) {
+            const columnsWithMetadata = cachedDetails.columns.filter((col: any) => 
+              col.draftDescription || col.currentDescription || 
+              (col.metadata && Object.keys(col.metadata).length > 0)
+            );
+            setTaggedColumns(columnsWithMetadata);
+            setCurrentColumnIndex(-1);
+          }
+        }
+      }
     }
   };
 
@@ -959,12 +1024,30 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           >
             {isAccepting[currentItem.id] ? 'Accepting...' : 'Accept'}
           </Button>
-          {/* Debug button */}
           <Button
             variant="outlined"
             color="warning"
+            onClick={() => handleMarkForRegeneration(currentItem.id)}
+            startIcon={
+              <AutorenewIcon sx={{ 
+                animation: currentItem.isMarkingForRegeneration ? 'spin 1s linear infinite' : 'none',
+                '@keyframes spin': {
+                  '0%': { transform: 'rotate(0deg)' },
+                  '100%': { transform: 'rotate(360deg)' }
+                }
+              }} />
+            }
+            disabled={currentItem.toBeRegenerated || currentItem['to-be-regenerated'] || currentItem.metadata?.to_be_regenerated || currentItem.isMarkingForRegeneration}
+          >
+            {currentItem.isMarkingForRegeneration ? 'Marking...' : 'Mark for Regeneration'}
+          </Button>
+          {/* Debug button - kept for development purposes */}
+          <Button
+            variant="outlined"
+            color="info"
             onClick={logDebugInfo}
             size="small"
+            sx={{ ml: 1 }}
           >
             Debug
           </Button>
