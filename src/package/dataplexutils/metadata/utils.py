@@ -97,24 +97,48 @@ class MetadataUtils:
             str: The combined description
         """
         if not new_description:
+            logger.debug(f"No new description provided, returning old description: {old_description[:50]}...")
             return old_description
 
-        if description_handling == constants["DESCRIPTION_HANDLING"]["APPEND"]:
+        # Convert description_handling to lowercase for case-insensitive comparison
+        description_handling_lower = description_handling.lower() if description_handling else ""
+        
+        logger.debug(f"Combining descriptions: old_description: {old_description[:50]}...")
+        logger.debug(f"new_description: {new_description[:50]}...")
+        logger.debug(f"description_handling: {description_handling}")
+        logger.debug(f"description_handling_lower: {description_handling_lower}")
+        logger.debug(f"constants[\"DESCRIPTION_HANDLING\"][\"APPEND\"]: {constants['DESCRIPTION_HANDLING']['APPEND']}")
+        logger.debug(f"constants[\"DESCRIPTION_HANDLING\"][\"PREPEND\"]: {constants['DESCRIPTION_HANDLING']['PREPEND']}")
+        logger.debug(f"constants[\"DESCRIPTION_HANDLING\"][\"REPLACE\"]: {constants['DESCRIPTION_HANDLING']['REPLACE']}")
+
+        if description_handling_lower == constants["DESCRIPTION_HANDLING"]["APPEND"]:
+            logger.debug(f"Using APPEND strategy")
             if old_description:
                 try:
                     # Try to find the AI warning prefix in old description
                     index = old_description.index(constants['OUTPUT_CLAUSES']['AI_WARNING'])
                     # If found, replace everything after the prefix
-                    return old_description[:index] + new_description
+                    result = old_description[:index] + new_description
+                    logger.debug(f"Found AI warning prefix, replacing content after prefix: {result[:50]}...")
+                    return result
                 except ValueError:
                     # If no prefix found, append normally
-                    return old_description + new_description
+                    result = old_description + new_description
+                    logger.debug(f"No AI warning prefix found, appending normally: {result[:50]}...")
+                    return result
+            logger.debug(f"No old description, returning new description: {new_description[:50]}...")
             return new_description
-        elif description_handling == constants["DESCRIPTION_HANDLING"]["PREPEND"]:
-            return new_description + old_description
-        elif description_handling == constants["DESCRIPTION_HANDLING"]["REPLACE"]:
+        elif description_handling_lower == constants["DESCRIPTION_HANDLING"]["PREPEND"]:
+            logger.debug(f"Using PREPEND strategy")
+            result = new_description + old_description
+            logger.debug(f"Prepending new description: {result[:50]}...")
+            return result
+        elif description_handling_lower == constants["DESCRIPTION_HANDLING"]["REPLACE"]:
+            logger.debug(f"Using REPLACE strategy")
+            logger.debug(f"Replacing old description with new description: {new_description[:50]}...")
             return new_description
         else:
+            logger.debug(f"No valid description handling provided, returning old description: {old_description[:50]}...")
             return old_description
 
     def llm_inference(self, prompt, documentation_uri=None):

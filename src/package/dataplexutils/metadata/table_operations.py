@@ -64,7 +64,8 @@ class TableOperations:
         Raises:
             NotFound: If the specified table does not exist.
         """
-        logger.info(f"Generating metadata for dataset {dataset_fqn}.")
+        logger.info(f"Generating metadata for dataset {dataset_fqn}")
+        logger.info(f"Settings: {self._client._client_options}")
         try:
             logger.info(f"Strategy received: {strategy}")
             logger.info(f"Available strategies: {constants['GENERATION_STRATEGY']}")

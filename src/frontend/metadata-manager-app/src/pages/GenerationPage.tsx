@@ -250,8 +250,11 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
       timestamp: new Date(),
       details: {
         project: config.project_id || undefined,
+        dataset: config.dataset_id || undefined,
         scope: 'dataset_all',
-        description: 'get regeneration counts',
+        description: selectedForRegeneration.length > 0 
+          ? `get regeneration counts (filter: ${selectedForRegeneration.join(', ')})` 
+          : 'get regeneration counts',
       }
     };
     onTaskAdd(task);
@@ -259,16 +262,45 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
     try {
       setIsLoadingCounts(true);
       setError(null);
-      const response = await axios.get(`${apiUrlBase}/get_regeneration_counts`);
+      
+      // Create request payload with all necessary settings
+      const requestPayload = {
+        client_settings: {
+          project_id: config.project_id,
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
+        },
+        dataset_settings: {
+          project_id: config.project_id,
+          dataset_id: config.dataset_id,
+          documentation_csv_uri: config.documentation_csv_uri,
+          strategy: config.strategy
+        },
+        // Add the filter pattern if it exists
+        search_query: selectedForRegeneration.length > 0 ? selectedForRegeneration[0] : null
+      };
+      
+      console.log('Sending regeneration counts request with payload:', requestPayload);
+      
+      const response = await axios.post(`${apiUrlBase}/get_regeneration_counts`, requestPayload);
       setRegenerationCounts(response.data);
       onTaskUpdate(taskId, { status: 'completed' });
     } catch (error) {
       console.error('API Error:', error);
-      const errorMessage = 'Failed to fetch regeneration counts.';
-      setError(errorMessage);
+      let countsErrorMessage = 'Failed to fetch regeneration counts.';
+      
+      // Extract more specific error message if available
+      if (axios.isAxiosError(error) && error.response) {
+        const responseData = error.response.data;
+        if (responseData && responseData.detail) {
+          countsErrorMessage = `Failed to fetch regeneration counts: ${responseData.detail}`;
+        }
+      }
+      
+      setError(countsErrorMessage);
       onTaskUpdate(taskId, { 
         status: 'failed',
-        error: errorMessage
+        error: countsErrorMessage
       });
     } finally {
       setIsLoadingCounts(false);
@@ -293,7 +325,31 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
 
     try {
       setError(null);
-      await axios.post(`${apiUrlBase}/regenerate_all`);
+      await axios.post(`${apiUrlBase}/regenerate_all`, {
+        client_settings: {
+          project_id: config.project_id,
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
+        },
+        client_options_settings: {
+          use_lineage_tables: config.use_lineage_tables,
+          use_lineage_processes: config.use_lineage_processes,
+          use_profile: config.use_profile,
+          use_data_quality: config.use_data_quality,
+          use_ext_documents: config.use_ext_documents,
+          persist_to_dataplex_catalog: config.persist_to_dataplex_catalog,
+          stage_for_review: config.stage_for_review,
+          top_values_in_description: config.top_values_in_description,
+          description_handling: config.description_handling,
+          description_prefix: config.description_prefix,
+        },
+        dataset_settings: {
+          project_id: config.project_id,
+          dataset_id: config.dataset_id,
+          documentation_csv_uri: config.documentation_csv_uri,
+          strategy: config.strategy
+        }
+      });
       onTaskUpdate(taskId, { status: 'completed' });
       // Refresh counts after regeneration
       handleGetRegenerationCounts();
@@ -310,6 +366,9 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
 
   const handleRegenerateSelected = async () => {
     const taskId = uuidv4();
+    // Get just the table name or pattern without project and dataset
+    const tablePattern = selectedForRegeneration.length > 0 ? selectedForRegeneration[0] : '';
+      
     const task: Task = {
       id: taskId,
       type: 'regenerate',
@@ -318,8 +377,9 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
       timestamp: new Date(),
       details: {
         project: config.project_id || undefined,
+        dataset: config.dataset_id || undefined,
         scope: 'dataset_all',
-        description: `selected objects (pattern: ${selectedForRegeneration.join(', ')})`,
+        description: `selected objects (pattern: ${tablePattern})`,
       }
     };
     onTaskAdd(task);
@@ -327,7 +387,32 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
     try {
       setError(null);
       await axios.post(`${apiUrlBase}/regenerate_selected`, {
-        objects: selectedForRegeneration
+        client_settings: {
+          project_id: config.project_id,
+          llm_location: config.llm_location,
+          dataplex_location: config.dataplex_location,
+        },
+        client_options_settings: {
+          use_lineage_tables: config.use_lineage_tables,
+          use_lineage_processes: config.use_lineage_processes,
+          use_profile: config.use_profile,
+          use_data_quality: config.use_data_quality,
+          use_ext_documents: config.use_ext_documents,
+          persist_to_dataplex_catalog: config.persist_to_dataplex_catalog,
+          stage_for_review: config.stage_for_review,
+          top_values_in_description: config.top_values_in_description,
+          description_handling: config.description_handling,
+          description_prefix: config.description_prefix,
+        },
+        dataset_settings: {
+          project_id: config.project_id,
+          dataset_id: config.dataset_id,
+          documentation_csv_uri: config.documentation_csv_uri,
+          strategy: config.strategy
+        },
+        regeneration_request: {
+          objects: [tablePattern]
+        }
       });
       onTaskUpdate(taskId, { status: 'completed' });
       // Refresh counts after regeneration
@@ -653,14 +738,18 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
                     startIcon={<AutorenewIcon />}
                     fullWidth
                   >
-                    Get Objects for Regeneration Count
+                    {selectedForRegeneration.length > 0 && selectedForRegeneration[0] 
+                      ? "Get Filtered Regeneration Count" 
+                      : "Get Objects for Regeneration Count"}
                   </Button>
                   
                   {regenerationCounts.tables > 0 || regenerationCounts.columns > 0 ? (
                     <Card sx={{ mt: 2 }}>
                       <CardContent>
                         <Typography variant="h6" gutterBottom>
-                          Objects marked for regeneration:
+                          {selectedForRegeneration.length > 0 && selectedForRegeneration[0]
+                            ? "Filtered objects for regeneration:"
+                            : "Objects marked for regeneration:"}
                         </Typography>
                         <Box sx={{ display: 'flex', justifyContent: 'space-around', mt: 2 }}>
                           <Box sx={{ textAlign: 'center' }}>
@@ -723,11 +812,24 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
                   </Box>
 
                   <TextField
-                    label="Filter Pattern (e.g., project.dataset.table*)"
+                    label="Filter Pattern (e.g., table_name or *pattern*)"
                     fullWidth
-                    onChange={(e) => setSelectedForRegeneration([e.target.value])}
-                    helperText="Use * as wildcard. Example: project.dataset.* for all tables in a dataset"
+                    onChange={(e) => {
+                      // Only set non-empty values or empty array
+                      if (e.target.value.trim()) {
+                        setSelectedForRegeneration([e.target.value.trim()]);
+                      } else {
+                        setSelectedForRegeneration([]);
+                      }
+                    }}
+                    helperText="Enter a table name or pattern with * wildcard. You don't need to include project/dataset - they're added automatically."
                   />
+                  
+                  {selectedForRegeneration.length > 0 && selectedForRegeneration[0] && (
+                    <Alert severity="info" sx={{ mt: 2 }}>
+                      Active filter: <strong>{selectedForRegeneration[0]}</strong> in dataset <strong>{config.project_id}.{config.dataset_id}</strong>
+                    </Alert>
+                  )}
                 </Box>
               </Grid>
             </Grid>

@@ -138,7 +138,7 @@ class DataplexOperations:
                     if i.endswith(f"""global.overview""") and current_entry.aspects[i].path == "":
                         logger.info(f"Reading existing aspect {i} of table {table_fqn}")
                         old_overview = dict(current_entry.aspects[i].data)
-                        logger.info(f"""old_overview: {old_overview["content"]}""")
+                        logger.info(f"""old_overview: {old_overview["content"][1:50]}...""")
             except Exception as e:
                 logger.error(f"Exception: {e}.")
                 raise e
@@ -150,16 +150,20 @@ class DataplexOperations:
 
             if old_overview is not None:
                 old_description = old_overview["content"]
+                logger.debug(f"""old_description: {old_description[0:50]}...""")
+                logger.debug(f"""new description: {description[0:50]}...""")
+                logger.debug(f"""description_handling: {self._client._client_options._description_handling}""")
                 combined_description = self._client._utils.combine_description(
                     old_description, 
                     description, 
                     self._client._client_options._description_handling
                 )
+                logger.debug(f"""FINAL combined_description: {combined_description}""")
                 aspect_content["content"] = combined_description
             else:
                 aspect_content = {"content": description}
 
-            logging.info(f"""aspect_content: {aspect_content}""")
+            logger.info(f"""aspect_content: {aspect_content}...""")
             # Convert aspect_content to a Struct
             data_struct = struct_pb2.Struct()
             data_struct.update(aspect_content)
@@ -167,6 +171,7 @@ class DataplexOperations:
 
             overview_path = f"dataplex-types.global.overview"
 
+            logger.info(f"project_id: {project_id}, dataset_id: {dataset_id}, table_id: {table_id}")
             entry = dataplex_v1.Entry()
             entry.name = entry_name
             entry.aspects[overview_path] = aspect
@@ -299,40 +304,54 @@ class DataplexOperations:
             Exception: If there is an error accepting the draft description
         """
         try:
-            # Get the current draft description from the aspect
+            # Create a client
             client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
-            aspect_name = f"projects/{table_fqn.split('.')[0]}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{table_fqn.replace('.','/datasets/',1).replace('.','/tables/',1)}/aspects/{constants['ASPECTS']['METADATA_AI_GENERATED']}"
             
-            try:
-                aspect = client.get_aspect(name=aspect_name)
-                draft_description = aspect.data["contents"]
-            except Exception as e:
-                logger.error(f"Failed to get draft description: {e}")
-                return False
+            # Get project and dataset IDs
+            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
             
-            # Update the actual table description
-            entry_name = f"projects/{table_fqn.split('.')[0]}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{table_fqn.replace('.','/datasets/',1).replace('.','/tables/',1)}"
+            # Set up aspect types and entry name
+            aspect_types = [
+                f"""projects/{self._client._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""
+            ]
             
-            try:
-                # Get the current entry
-                entry = client.get_entry(name=entry_name)
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+            
+            # Get the entry with the draft aspect
+            request = dataplex_v1.GetEntryRequest(
+                name=entry_name,
+                view=dataplex_v1.EntryView.CUSTOM,
+                aspect_types=aspect_types
+            )
+            
+            entry = client.get_entry(request=request)
+            overview = None
+            
+            # Find the draft description in the custom aspect
+            for aspect_key, aspect in entry.aspects.items():
+                logger.info(f"Processing aspect: {aspect_key}")
+                if aspect.aspect_type.endswith(f"""aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}""") and aspect.path == "":
+                    if "contents" in aspect.data:
+                        overview = aspect.data["contents"]
+                        logger.info(f"Found draft description: {overview[:50]}...")
+                        break
+            
+
+            if overview:
+                # Update both BigQuery and Dataplex descriptions
+                logger.info(f"Updating Dataplex description: {overview}")
+                success_dataplex = self.update_table_dataplex_description(table_fqn, overview)
+                logger.info(f"Updating BigQuery description: {overview}")
+                success_bigquery = self._client._bigquery_ops.update_table_description(table_fqn, overview)
                 
-                # Update the description
-                entry.description = draft_description
-                
-                # Create update mask
-                update_mask = field_mask_pb2.FieldMask()
-                update_mask.paths.append("description")
-                
-                # Update the entry
-                client.update_entry(
-                    entry=entry,
-                    update_mask=update_mask
-                )
-                
-                return True
-            except Exception as e:
-                logger.error(f"Failed to update table description: {e}")
+                if success_dataplex and success_bigquery:
+                    logger.info(f"Successfully updated description for table {table_fqn}")
+                    return True
+                else:
+                    logger.warning(f"Partial update for table {table_fqn}: Dataplex={success_dataplex}, BigQuery={success_bigquery}")
+                    return False
+            else:
+                logger.warning(f"No draft description found for table {table_fqn}")
                 return False
                 
         except Exception as e:
@@ -562,45 +581,55 @@ class DataplexOperations:
             table_fqn (str): The fully qualified name of the table (project.dataset.table)
             column_name (str): The name of the column to update
 
+        Returns:
+            bool: True if successful, False otherwise
+
         Raises:
             Exception: If there's an error accessing or updating the entry
         """
-        # Create a client
-        client = dataplex_v1.CatalogServiceClient()
-
-        aspect_types = [f"""projects/{self._client._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""]
-        project_id, dataset_id, table_id = self._client._split_table_fqn(table_fqn)
-
-        entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
-
-        request = dataplex_v1.GetEntryRequest(
-            name=entry_name,
-            view=dataplex_v1.EntryView.CUSTOM,
-            aspect_types=aspect_types
-        )
-        overview = None
         try:
-            entry = client.get_entry(request=request)
-        except Exception as e:
-            logger.error(f"Exception: {e}.")
-            raise e
-        
-        for aspect in entry.aspects:
-            aspect_data = entry.aspects[aspect]
-            logger.info(f"aspect_type: {aspect_data.aspect_type}")
-            logger.info(f"path: {aspect_data.path}")
-            if aspect_data.aspect_type.endswith(f"""aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}""") and aspect_data.path.endswith(f"""Schema.{column_name}"""):
-                for i in aspect_data.data:
-                    if i == "contents":
-                        overview = aspect_data.data[i]
+            # Create a client
+            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
 
-        if overview:
-            self._client._bigquery_ops.update_column_description(table_fqn, column_name, overview)
-            logger.info(f"Successfully updated description for column {column_name} in table {table_fqn}")
-            return True
-        else:
-            logger.warning(f"No draft description found for column {column_name} in table {table_fqn}")
-            return False 
+            aspect_types = [f"""projects/{self._client._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""]
+            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
+
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+
+            request = dataplex_v1.GetEntryRequest(
+                name=entry_name,
+                view=dataplex_v1.EntryView.CUSTOM,
+                aspect_types=aspect_types
+            )
+            overview = None
+            
+            entry = client.get_entry(request=request)
+            
+            for aspect_key, aspect in entry.aspects.items():
+                logger.info(f"Processing aspect: {aspect_key}")
+                logger.info(f"Aspect path: {aspect.path}")
+                
+                if aspect.aspect_type.endswith(f"""aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}""") and aspect.path == f"Schema.{column_name}":
+                    if "contents" in aspect.data:
+                        overview = aspect.data["contents"]
+                        logger.info(f"Found draft description for column {column_name}: {overview[:50]}...")
+                        break
+
+            if overview:
+                success = self._client._bigquery_ops.update_column_description(table_fqn, column_name, overview)
+                if success:
+                    logger.info(f"Successfully updated description for column {column_name} in table {table_fqn}")
+                    return True
+                else:
+                    logger.warning(f"Failed to update description for column {column_name} in table {table_fqn}")
+                    return False
+            else:
+                logger.warning(f"No draft description found for column {column_name} in table {table_fqn}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Exception in accept_column_draft_description: {e}")
+            return False
 
     def get_table_quality(self, use_data_quality, table_fqn):
         """Gets the quality information for a table from Dataplex.

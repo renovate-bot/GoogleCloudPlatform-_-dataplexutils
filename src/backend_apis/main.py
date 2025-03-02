@@ -224,16 +224,16 @@ def generate_dataset_tables_descriptions(
     try:
         logger.debug("Generating dataset tables request")
         client_options = ClientOptions(
-            client_options_settings.use_lineage_tables,
-            client_options_settings.use_lineage_processes,
-            client_options_settings.use_profile,
-            client_options_settings.use_data_quality,
-            client_options_settings.use_ext_documents,
-            client_options_settings.persist_to_dataplex_catalog,
-            client_options_settings.stage_for_review,
-            client_options_settings.top_values_in_description,
-            client_options_settings.description_handling,
-            client_options_settings.description_prefix
+            use_lineage_tables=client_options_settings.use_lineage_tables,
+            use_lineage_processes=client_options_settings.use_lineage_processes,
+            use_profile=client_options_settings.use_profile,
+            use_data_quality=client_options_settings.use_data_quality,
+            use_ext_documents=client_options_settings.use_ext_documents,
+            persist_to_dataplex_catalog=client_options_settings.persist_to_dataplex_catalog,
+            stage_for_review=client_options_settings.stage_for_review,
+            top_values_in_description=client_options_settings.top_values_in_description,
+            description_handling=client_options_settings.description_handling,
+            description_prefix=client_options_settings.description_prefix
         )
         client = Client(
             project_id=client_settings.project_id,
@@ -277,16 +277,16 @@ def generate_dataset_tables_columns_descriptions(
     try:
         logger.debug("Generating dataset tables request")
         client_options = ClientOptions(
-            client_options_settings.use_lineage_tables,
-            client_options_settings.use_lineage_processes,
-            client_options_settings.use_profile,
-            client_options_settings.use_data_quality,
-            client_options_settings.use_ext_documents,
-            client_options_settings.persist_to_dataplex_catalog,
-            client_options_settings.stage_for_review,
-            client_options_settings.top_values_in_description,
-            client_options_settings.description_handling,
-            client_options_settings.description_prefix
+            use_lineage_tables=client_options_settings.use_lineage_tables,
+            use_lineage_processes=client_options_settings.use_lineage_processes,
+            use_profile=client_options_settings.use_profile,
+            use_data_quality=client_options_settings.use_data_quality,
+            use_ext_documents=client_options_settings.use_ext_documents,
+            persist_to_dataplex_catalog=client_options_settings.persist_to_dataplex_catalog,
+            stage_for_review=client_options_settings.stage_for_review,
+            top_values_in_description=client_options_settings.top_values_in_description,
+            description_handling=client_options_settings.description_handling,
+            description_prefix=client_options_settings.description_prefix
         )
         client = Client(
             project_id=client_settings.project_id,
@@ -460,37 +460,109 @@ async def log_requests(request: Request, call_next):
     return response
 
 # Regeneration Management APIs
-@app.get("/get_regeneration_counts")
+@app.post("/get_regeneration_counts")
 def get_regeneration_counts(
     client_settings: ClientSettings = Body(),
     dataset_settings: DatasetSettings = Body(),
+    search_query: str = Body(None),
 ):
     try:
+        # Validate required parameters
+        if not client_settings.project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="project_id is required"
+            )
+        if not client_settings.llm_location:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="llm_location is required"
+            )
+        if not client_settings.dataplex_location:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="dataplex_location is required"
+            )
+        if not dataset_settings.project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="dataset_project_id is required"
+            )
+            
         client = Client(
             project_id=client_settings.project_id,
             llm_location=client_settings.llm_location,
             dataplex_location=client_settings.dataplex_location,
         )
         
-        dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
-        tables = client._review_ops.get_review_items_for_dataset(dataset_fqn) #TODO: remove "CC" before release and change to finding the aspect
+        dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}" 
+        logger.info(f"Getting regeneration counts for dataset: {dataset_fqn}")
+        
+        # Always include the dataset_fqn in the query
+        # If search_query is provided, combine it with the dataset filter
+        # If not, just use the dataset filter
+        effective_query = f"parent:{dataset_fqn}"
+        if search_query:
+            effective_query = f"{effective_query} AND {search_query}"
+            
+        logger.info(f"Final query for review items: {effective_query}")
+        tables = client._review_ops.get_review_items_for_dataset(dataset_fqn, effective_query)
         tables_count = len(tables.get("data", {}).get("items", []))
         
+        logger.info(f"Found {tables_count} tables marked for regeneration")
         return RegenerationCounts(
             tables=tables_count,
             columns=0  # TODO: Implement column counting
         )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         logger.error(f"Error in get_regeneration_counts: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
 
+# Add a GET endpoint for backward compatibility
+@app.get("/get_regeneration_counts")
+def get_regeneration_counts_get(
+    project_id: str,
+    llm_location: str,
+    dataplex_location: str,
+    dataset_project_id: str,
+    dataset_id: str,
+    search_query: str = None,
+):
+    logger.info(f"GET request received for get_regeneration_counts, converting to POST format")
+    
+    # Create the objects expected by the POST endpoint
+    client_settings = ClientSettings(
+        project_id=project_id,
+        llm_location=llm_location,
+        dataplex_location=dataplex_location
+    )
+    
+    dataset_settings = DatasetSettings(
+        project_id=dataset_project_id,
+        dataset_id=dataset_id,
+        documentation_csv_uri="",  # Required by the model but not used for this endpoint
+        strategy=""  # Required by the model but not used for this endpoint
+    )
+    
+    # Call the POST endpoint handler
+    return get_regeneration_counts(
+        client_settings=client_settings,
+        dataset_settings=dataset_settings,
+        search_query=search_query
+    )
+
 @app.post("/regenerate_selected")
 def regenerate_selected(
     client_options_settings: ClientOptionsSettings = Body(),
     client_settings: ClientSettings = Body(),
+    dataset_settings: DatasetSettings = Body(),
     regeneration_request: RegenerationRequest = Body(),
 ):
     try:
@@ -501,15 +573,40 @@ def regenerate_selected(
             client_options=ClientOptions(**client_options_settings.dict())
         )
         
+        dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
+        search_query = regeneration_request.objects[0] if regeneration_request.objects else None
+        
+        logger.info(f"Processing regeneration for dataset: {dataset_fqn} with filter: {search_query}")
+        
+        # Always include the dataset_fqn in the query
+        # If search_query is provided, combine it with the dataset filter
+        effective_query = f"parent:{dataset_fqn}"
+        if search_query:
+            effective_query = f"{effective_query} AND {search_query}"
+            
+        logger.info(f"Final query for review items: {effective_query}")
+        
+        # Get all items matching the pattern
+        matching_items = client._review_ops.get_review_items_for_dataset(dataset_fqn, effective_query)
+        items = matching_items.get("data", {}).get("items", [])
+        
+        logger.info(f"Found {len(items)} items matching filter")
+        
         results = []
-        for obj in regeneration_request.objects:
-            # TODO: Implement regeneration logic for individual objects
-            # This should handle both tables and columns
-            results.append({"object": obj, "status": "regenerated"})
+        for item in items:
+            item_name = item.get("name", "")
+            logger.info(f"Regenerating item: {item_name}")
+            
+            # TODO: Implement actual regeneration logic here
+            # This is a placeholder - you'll need to implement the actual regeneration
+            # based on your application's requirements
+            
+            results.append({"object": item_name, "status": "regenerated"})
         
         return {"regenerated_objects": results}
     except Exception as e:
         logger.error(f"Error in regenerate_selected: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -530,16 +627,33 @@ def regenerate_all(
         )
         
         dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
-        tables = client._review_ops.get_review_items_for_dataset(dataset_fqn)
+        logger.info(f"Getting all items marked for regeneration in dataset: {dataset_fqn}")
+        
+        # Always include the dataset_fqn in the query to ensure we only get items from this dataset
+        effective_query = f"parent:{dataset_fqn}"
+        logger.info(f"Final query for review items: {effective_query}")
+        
+        # Get all items marked for regeneration
+        tables = client._review_ops.get_review_items_for_dataset(dataset_fqn, effective_query)
+        items = tables.get("data", {}).get("items", [])
+        
+        logger.info(f"Found {len(items)} items marked for regeneration")
         
         results = []
-        for table in tables.get("data", {}).get("items", []):
-            # TODO: Implement regeneration logic for all marked objects
-            results.append({"table": table["name"], "status": "regenerated"})
+        for item in items:
+            item_name = item.get("name", "")
+            logger.info(f"Regenerating item: {item_name}")
+            
+            # TODO: Implement actual regeneration logic here
+            # This is a placeholder - you'll need to implement the actual regeneration
+            # based on your application's requirements
+            
+            results.append({"table": item_name, "status": "regenerated"})
         
         return {"regenerated_objects": results}
     except Exception as e:
         logger.error(f"Error in regenerate_all: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

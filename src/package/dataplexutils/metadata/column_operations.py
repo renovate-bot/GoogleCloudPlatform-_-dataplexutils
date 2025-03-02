@@ -40,6 +40,78 @@ class ColumnOperations:
         """Initialize with reference to main client."""
         self._client = client
 
+    def generate_dataset_tables_columns_descriptions(self, dataset_fqn, strategy="NAIVE", documentation_csv_uri=None):
+        """Generates metadata on the columns of tables in a whole dataset.
+
+        Args:
+            dataset_fqn: The fully qualified name of the dataset
+            (e.g., 'project.dataset')
+            strategy: The strategy to use for generation
+            documentation_csv_uri: Optional URI to documentation CSV
+
+        Returns:
+            None.
+
+        Raises:
+            NotFound: If the specified dataset does not exist.
+        """
+        logger.info(f"Generating column metadata for dataset {dataset_fqn}.")
+        try:
+            logger.info(f"Strategy received: {strategy}")
+            logger.info(f"Available strategies: {constants['GENERATION_STRATEGY']}")
+            
+            # Validate strategy exists
+            if strategy not in constants["GENERATION_STRATEGY"]:
+                raise ValueError(f"Invalid strategy: {strategy}. Valid strategies are: {list(constants['GENERATION_STRATEGY'].keys())}")
+            
+            int_strategy = constants["GENERATION_STRATEGY"][strategy]
+            logger.info(f"Strategy value: {int_strategy}")
+
+            if int_strategy not in constants["GENERATION_STRATEGY"].values():
+                raise ValueError(f"Invalid strategy: {strategy}.")
+            
+            if int_strategy == constants["GENERATION_STRATEGY"]["DOCUMENTED"]:
+                if documentation_csv_uri is None:
+                    raise ValueError("A documentation URI is required for the DOCUMENTED strategy.")
+
+            # Get tables in dataset
+            if self._client._client_options._regenerate:
+                tables = self._client._table_ops._list_tables_in_dataset_for_regeneration(dataset_fqn)
+                logger.debug(f"Tables to regenerate columns: {tables}")
+            else:
+                tables = self._client._table_ops._list_tables_in_dataset(dataset_fqn)
+                logger.debug(f"Tables to generate columns: {tables}")
+            
+            if int_strategy == constants["GENERATION_STRATEGY"]["DOCUMENTED"]:
+                tables_from_uri = self._client._table_ops._get_tables_from_uri(documentation_csv_uri)
+                for table in tables_from_uri:
+                    if table[0] not in tables:
+                        raise ValueError(f"Table {table[0]} not found in dataset {dataset_fqn}.")
+                    # Generate columns for this table
+                    self.generate_columns_descriptions(table[0], table[1])
+
+            if int_strategy == constants["GENERATION_STRATEGY"]["DOCUMENTED_THEN_REST"]:
+                tables_from_uri = self._client._table_ops._get_tables_from_uri(documentation_csv_uri)
+                for table in tables_from_uri:
+                    if table[0] not in tables:
+                        raise ValueError(f"Table {table[0]} not found in dataset {dataset_fqn}.")
+                    # Generate columns for this table
+                    self.generate_columns_descriptions(table[0], table[1])
+
+                tables_from_uri_first_elements = [table[0] for table in tables_from_uri]
+                for table in tables:
+                    if table not in tables_from_uri_first_elements:
+                        self.generate_columns_descriptions(table)
+            
+            if int_strategy in [constants["GENERATION_STRATEGY"]["NAIVE"], constants["GENERATION_STRATEGY"]["RANDOM"], constants["GENERATION_STRATEGY"]["ALPHABETICAL"]]:
+                tables_sorted = self._client._table_ops._order_tables_to_strategy(tables, int_strategy)
+                for table in tables_sorted:
+                    self.generate_columns_descriptions(table)
+
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
     def generate_columns_descriptions(self, table_fqn, documentation_uri=None, human_comments=None):
         """Generates metadata on the columns.
 

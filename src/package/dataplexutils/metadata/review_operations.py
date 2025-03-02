@@ -47,7 +47,7 @@ class ReviewOperations:
         """Initialize with reference to main client."""
         self._client = client
 
-    def get_review_items_for_dataset(self, search_query: str = "cc", page_size: int = 100, page_token: str = None) -> dict:
+    def get_review_items_for_dataset(self, dataset_fqn: str, search_query: str = "cc", page_size: int = 100, page_token: str = None) -> dict:
         """Get review items for a dataset based on search criteria.
 
         Args:
@@ -69,7 +69,7 @@ class ReviewOperations:
                 name = f"projects/{self._client._project_id}/locations/global"
                 query = f"""system=BIGQUERY"""
                 if search_query:
-                    query = f"""{query} AND ({search_query})"""
+                    query = f"""{query} AND parent:{dataset_fqn} AND {search_query}"""
                 logger.info(f"Built search request - name: {name}, query: {query}")
                 
                 request = dataplex_v1.SearchEntriesRequest(
@@ -673,4 +673,148 @@ class ReviewOperations:
         except Exception as e:
             logger.error(f"Error getting draft description for column {column_name} in table {table_fqn}: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return None 
+            return None
+
+    def reject_review_item(self, item_id: str) -> dict:
+        """Reject a review item by ID.
+        
+        Args:
+            item_id (str): The ID of the review item to reject
+            
+        Returns:
+            dict: Result of the operation
+        """
+        try:
+            logger.info(f"Rejecting review item with ID: {item_id}")
+            
+            # Parse the item_id to determine if it's a table or column
+            parts = item_id.split(":")
+            if len(parts) < 2:
+                raise ValueError(f"Invalid item ID format: {item_id}")
+                
+            item_type = parts[0]
+            
+            if item_type == "table":
+                # Format: table:project.dataset.table
+                table_fqn = ":".join(parts[1:])
+                # Mark the table for regeneration
+                self._client._dataplex_ops.mark_table_for_regeneration(table_fqn)
+                return {"success": True, "message": f"Table {table_fqn} marked for regeneration"}
+            elif item_type == "column":
+                # Format: column:project.dataset.table:column_name
+                table_fqn = parts[1]
+                column_name = parts[2]
+                # Mark the column for regeneration
+                self._client._dataplex_ops.mark_column_for_regeneration(table_fqn, column_name)
+                return {"success": True, "message": f"Column {column_name} in table {table_fqn} marked for regeneration"}
+            else:
+                raise ValueError(f"Unknown item type: {item_type}")
+                
+        except Exception as e:
+            logger.error(f"Error rejecting review item: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {"success": False, "error": str(e)}
+            
+    def edit_review_item(self, item_id: str, description: str) -> dict:
+        """Edit a review item's description.
+        
+        Args:
+            item_id (str): The ID of the review item to edit
+            description (str): The new description
+            
+        Returns:
+            dict: Result of the operation
+        """
+        try:
+            logger.info(f"Editing review item with ID: {item_id}")
+            
+            # Parse the item_id to determine if it's a table or column
+            parts = item_id.split(":")
+            if len(parts) < 2:
+                raise ValueError(f"Invalid item ID format: {item_id}")
+                
+            item_type = parts[0]
+            
+            if item_type == "table":
+                # Format: table:project.dataset.table
+                table_fqn = ":".join(parts[1:])
+                # Update the table draft description
+                client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+                
+                # Get the entry
+                entry = self._client._dataplex_ops._get_entry(table_fqn)
+                if not entry:
+                    raise ValueError(f"Entry not found for table: {table_fqn}")
+                
+                # Update the draft description in the entry's aspects
+                aspects = entry.aspects
+                if not aspects:
+                    aspects = {}
+                
+                # Create or update the draft description aspect
+                draft_aspect_name = constants["DATAPLEX"]["DRAFT_DESCRIPTION_ASPECT_TYPE"]
+                if draft_aspect_name not in aspects:
+                    aspects[draft_aspect_name] = struct_pb2.Struct()
+                
+                aspects[draft_aspect_name].update({"description": description})
+                
+                # Update the entry
+                update_mask = field_mask_pb2.FieldMask(paths=["aspects"])
+                request = dataplex_v1.UpdateEntryRequest(
+                    entry=entry,
+                    update_mask=update_mask
+                )
+                
+                updated_entry = client.update_entry(request=request)
+                return {"success": True, "message": f"Table {table_fqn} description updated"}
+                
+            elif item_type == "column":
+                # Format: column:project.dataset.table:column_name
+                table_fqn = parts[1]
+                column_name = parts[2]
+                
+                # Update the column draft description
+                client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+                
+                # Get the entry
+                entry = self._client._dataplex_ops._get_entry(table_fqn)
+                if not entry:
+                    raise ValueError(f"Entry not found for table: {table_fqn}")
+                
+                # Update the draft description in the entry's aspects
+                aspects = entry.aspects
+                if not aspects:
+                    aspects = {}
+                
+                # Create or update the draft column descriptions aspect
+                draft_aspect_name = constants["DATAPLEX"]["DRAFT_COLUMN_DESCRIPTIONS_ASPECT_TYPE"]
+                if draft_aspect_name not in aspects:
+                    aspects[draft_aspect_name] = struct_pb2.Struct()
+                
+                # Get existing column descriptions
+                column_descriptions = {}
+                if aspects[draft_aspect_name].fields:
+                    column_descriptions = MessageToDict(aspects[draft_aspect_name])
+                
+                # Update the specific column description
+                column_descriptions[column_name] = description
+                
+                # Update the aspect
+                aspects[draft_aspect_name].update(column_descriptions)
+                
+                # Update the entry
+                update_mask = field_mask_pb2.FieldMask(paths=["aspects"])
+                request = dataplex_v1.UpdateEntryRequest(
+                    entry=entry,
+                    update_mask=update_mask
+                )
+                
+                updated_entry = client.update_entry(request=request)
+                return {"success": True, "message": f"Column {column_name} in table {table_fqn} description updated"}
+            else:
+                raise ValueError(f"Unknown item type: {item_type}")
+                
+        except Exception as e:
+            logger.error(f"Error editing review item: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {"success": False, "error": str(e)} 

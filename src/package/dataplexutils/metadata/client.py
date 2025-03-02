@@ -120,4 +120,13 @@ class Client:
         return self._dataplex_ops.mark_table_for_regeneration(table_fqn)
 
     def mark_column_for_regeneration(self, table_fqn: str, column_name: str):
-        return self._dataplex_ops.mark_column_for_regeneration(table_fqn, column_name) 
+        return self._dataplex_ops.mark_column_for_regeneration(table_fqn, column_name)
+
+    def generate_dataset_tables_columns_descriptions(self, dataset_fqn, strategy="NAIVE", documentation_csv_uri=None):
+        return self._column_ops.generate_dataset_tables_columns_descriptions(dataset_fqn, strategy, documentation_csv_uri)
+
+    def reject_review_item(self, item_id: str):
+        return self._review_ops.reject_review_item(item_id)
+        
+    def edit_review_item(self, item_id: str, description: str):
+        return self._review_ops.edit_review_item(item_id, description) 

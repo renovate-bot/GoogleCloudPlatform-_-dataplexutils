@@ -24,6 +24,7 @@ import pkgutil
 # Cloud imports
 from google.cloud.exceptions import NotFound
 from google.cloud import bigquery
+from google.api_core.exceptions import BadRequest, Forbidden
 
 # Load constants
 constants = toml.loads(pkgutil.get_data(__name__, "constants.toml").decode())
@@ -96,15 +97,16 @@ class BigQueryOperations:
             str: JSON string containing the sampled rows data
 
         Raises:
-            bigquery.exceptions.BadRequest: If the query is invalid
+            google.api_core.exceptions.BadRequest: If the query is invalid
+            google.api_core.exceptions.Forbidden: If the user doesn't have permissions
             Exception: If there is an error retrieving the sample
         """
         try:
             bq_client = self._client._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
             query = f"SELECT * FROM `{table_fqn}` LIMIT {num_rows_to_sample}"
             return bq_client.query(query).to_dataframe().to_json()
-        except bigquery.exceptions.BadRequest as e:
-            print(f"BigQuery Bad Request: {e}")
+        except (BadRequest, Forbidden) as e:
+            logger.warning(f"BigQuery error when sampling table {table_fqn}: {e}")
             return "[]"
         except Exception as e:
             logger.error(f"Exception: {e}.")
