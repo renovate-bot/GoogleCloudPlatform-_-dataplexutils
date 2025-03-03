@@ -28,6 +28,11 @@ from pydantic import ValidationError
 import json
 import uuid
 from google.cloud import dataplex_v1
+import toml
+import pkgutil
+
+# Load constants
+constants = toml.loads(pkgutil.get_data("dataplexutils.metadata", "constants.toml").decode())
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -498,12 +503,13 @@ def get_regeneration_counts(
         dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}" 
         logger.info(f"Getting regeneration counts for dataset: {dataset_fqn}")
         
-        # Always include the dataset_fqn in the query
-        # If search_query is provided, combine it with the dataset filter
-        # If not, just use the dataset filter
-        effective_query = f"parent:{dataset_fqn}"
+        # Use the utility method to build the effective query
+        # This ensures the dataset_fqn is always included in the query
+        
         if search_query:
-            effective_query = f"{effective_query} AND {search_query}"
+            effective_query = client._review_ops.build_search_query_for_regeneration(dataset_fqn, search_query)
+        else:
+            effective_query = client._review_ops.build_search_query_for_regeneration(dataset_fqn)
             
         logger.info(f"Final query for review items: {effective_query}")
         tables = client._review_ops.get_review_items_for_dataset(dataset_fqn, effective_query)
@@ -578,12 +584,9 @@ def regenerate_selected(
         
         logger.info(f"Processing regeneration for dataset: {dataset_fqn} with filter: {search_query}")
         
-        # Always include the dataset_fqn in the query
-        # If search_query is provided, combine it with the dataset filter
-        effective_query = f"parent:{dataset_fqn}"
-        if search_query:
-            effective_query = f"{effective_query} AND {search_query}"
-            
+        # Use the utility method to build the effective query
+        # This ensures the dataset_fqn is always included in the query
+        effective_query = client._review_ops.build_search_query_for_regeneration(dataset_fqn, search_query)
         logger.info(f"Final query for review items: {effective_query}")
         
         # Get all items matching the pattern
@@ -629,8 +632,10 @@ def regenerate_all(
         dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
         logger.info(f"Getting all items marked for regeneration in dataset: {dataset_fqn}")
         
-        # Always include the dataset_fqn in the query to ensure we only get items from this dataset
-        effective_query = f"parent:{dataset_fqn}"
+        # Use the utility method to build the effective query
+        # This ensures the dataset_fqn is always included in the query
+    
+        effective_query = client._review_ops.build_search_query_for_regeneration(dataset_fqn)
         logger.info(f"Final query for review items: {effective_query}")
         
         # Get all items marked for regeneration
@@ -700,16 +705,11 @@ def get_review_items(
         
         try:
             # Get all review items for the project, optionally filtered by dataset
-            search_query = "cc"  # Never remove hardcoded "cc"
-            if dataset_settings.dataset_id:
-                # If dataset_id is provided, use it as an additional filter
-                search_query = f"parent:{dataset_settings.dataset_id}"
+        
             
             logger.info(f"Getting review items for project {dataset_settings.project_id}")
-            if search_query:
-                logger.info(f"Filtering by dataset: {search_query}")
                 
-            result = client._review_ops.get_review_items_for_dataset(search_query)
+            result = client._review_ops.get_review_items_for_dataset(dataset_fqn=dataset_settings.dataset_id)
             logger.info(f"Raw result from review_ops: {result}")
             
             # Ensure we always return a properly structured response

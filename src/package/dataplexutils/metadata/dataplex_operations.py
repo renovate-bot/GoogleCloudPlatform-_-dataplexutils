@@ -213,13 +213,14 @@ class DataplexOperations:
             client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
             # Create new aspect content
             new_aspect_content = {
-                "certified": "false",
-                "user-who-certified": "",
+                #"certified": "false",
+                #"user-who-certified": "",
                 "contents": description,
                 "generation-date": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "to-be-regenerated": "false",
-                "human-comments": [],
-                "negative-examples": []
+                #"human-comments": [],
+                #"negative-examples": []
+                "is-accepted": "false"
             }
 
             # If additional metadata was provided, update the aspect content
@@ -257,7 +258,8 @@ class DataplexOperations:
                     update_data = {
                         "contents": description,
                         "generation-date": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "to-be-regenerated": "false"
+                        "to-be-regenerated": "false",
+                        "is-accepted": "false"
                     }
                     if metadata:
                         update_data.update(metadata)
@@ -377,14 +379,15 @@ class DataplexOperations:
 
             # Create new aspect content
             new_aspect_content = {
-                "certified": "false",
-                "user-who-certified": "",
+                #"certified": "false",
+                #"user-who-certified": "",
                 "contents": description,
                 "generation-date": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "to-be-regenerated": "false",
-                "human-comments": [],
-                "negative-examples": [],
-                "external-document-uri": ""
+                #"human-comments": [],
+                #"negative-examples": [],
+                #"external-document-uri": "",
+                "is-accepted": "false"
             }
 
             logger.info(f"aspect_content: {new_aspect_content}")
@@ -420,7 +423,8 @@ class DataplexOperations:
                     new_aspect.data.update({
                         "contents": description,
                         "generation-date": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "to-be-regenerated": "false"
+                        "to-be-regenerated": "false",
+                        "is-accepted": "false"
                     })
 
             new_entry = dataplex_v1.Entry()

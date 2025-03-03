@@ -47,7 +47,67 @@ class ReviewOperations:
         """Initialize with reference to main client."""
         self._client = client
 
-    def get_review_items_for_dataset(self, dataset_fqn: str, search_query: str = "cc", page_size: int = 100, page_token: str = None) -> dict:
+    def build_search_query_for_review(self, dataset_fqn: str, search_query: str = None) -> str:
+        """Build an effective query that always includes the dataset filter.
+        
+        This method ensures that the dataset_fqn is always included in the query,
+        even when no search_query is provided. If a search_query is provided,
+        it's combined with the dataset filter.
+        
+        Args:
+            dataset_fqn (str): The fully qualified name of the dataset (project_id.dataset_id)
+            search_query (str, optional): Additional search criteria to filter results
+            
+        Returns:
+            str: The effective query string that includes the dataset filter
+        """
+        # Start with the base system filter
+        base_query = f"""system=BIGQUERY and aspect:global.{constants['ASPECT_TEMPLATE']['name']}.is-accepted=false"""
+        
+        # Always include the dataset filter
+        dataset_filter = f"parent:{dataset_fqn}"
+        
+        # Combine filters
+        if search_query is not None:
+            # If search_query already contains the dataset filter, don't duplicate it
+            if f"parent:{dataset_fqn}" in search_query:
+                return f"{base_query} AND {search_query}"
+            else:
+                return f"{base_query} AND {dataset_filter} AND {search_query}"
+        else:
+            return f"{base_query} AND {dataset_filter}"
+        
+    def build_search_query_for_regeneration(self, dataset_fqn: str, search_query: str = None) -> str:
+        """Build an effective query that always includes the dataset filter.
+        
+        This method ensures that the dataset_fqn is always included in the query,
+        even when no search_query is provided. If a search_query is provided,
+        it's combined with the dataset filter.
+        
+        Args:
+            dataset_fqn (str): The fully qualified name of the dataset (project_id.dataset_id)
+            search_query (str, optional): Additional search criteria to filter results
+            
+        Returns:
+            str: The effective query string that includes the dataset filter
+        """
+        # Start with the base system filter
+        base_query = f"""system=BIGQUERY and aspect:global.{constants['ASPECT_TEMPLATE']['name']}.to-be-regenerated=true"""
+        
+        # Always include the dataset filter
+        dataset_filter = f"parent:{dataset_fqn}"
+        
+        # Combine filters
+        if search_query is not None:
+            # If search_query already contains the dataset filter, don't duplicate it
+            if f"parent:{dataset_fqn}" in search_query:
+                return f"{base_query} AND {search_query}"
+            else:
+                return f"{base_query} AND {dataset_filter} AND {search_query}"
+        else:
+            return f"{base_query} AND {dataset_filter}"
+
+    def get_review_items_for_dataset(self, dataset_fqn: str, search_query: str=None, page_size: int = 100, page_token: str = None) -> dict:
         """Get review items for a dataset based on search criteria.
 
         Args:
@@ -67,9 +127,9 @@ class ReviewOperations:
             try:
                 client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
                 name = f"projects/{self._client._project_id}/locations/global"
-                query = f"""system=BIGQUERY"""
-                if search_query:
-                    query = f"""{query} AND parent:{dataset_fqn} AND {search_query}"""
+
+                logger.info(f"Building search query for dataset: {dataset_fqn} and search query: {search_query}")
+                query = self.build_search_query_for_review(dataset_fqn, search_query)
                 logger.info(f"Built search request - name: {name}, query: {query}")
                 
                 request = dataplex_v1.SearchEntriesRequest(
