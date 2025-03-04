@@ -321,7 +321,7 @@ class TableOperations:
             client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
             project_id, dataset_id = self._client._utils.split_dataset_fqn(dataset_fqn)
             name = f"projects/{project_id}/locations/global"
-            query = f"""system=BIGQUERY AND parent:@bigquery/projects/{project_id}/datasets/{dataset_id}"""
+            query = f"""system=BIGQUERY AND parent:{project_id}.{dataset_id} and aspect:global.{constants['ASPECT_TEMPLATE']['name']}.to-be-regenerated=true"""
             logger.info(f"Query: {query}")
             
             request = dataplex_v1.SearchEntriesRequest(

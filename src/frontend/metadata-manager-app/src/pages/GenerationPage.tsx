@@ -252,9 +252,7 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
         project: config.project_id || undefined,
         dataset: config.dataset_id || undefined,
         scope: 'dataset_all',
-        description: selectedForRegeneration.length > 0 
-          ? `get regeneration counts (filter: ${selectedForRegeneration.join(', ')})` 
-          : 'get regeneration counts',
+        description: 'get regeneration counts',
       }
     };
     onTaskAdd(task);
@@ -275,15 +273,19 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
           dataset_id: config.dataset_id,
           documentation_csv_uri: config.documentation_csv_uri,
           strategy: config.strategy
-        },
-        // Add the filter pattern if it exists
-        search_query: selectedForRegeneration.length > 0 ? selectedForRegeneration[0] : null
+        }
       };
       
       console.log('Sending regeneration counts request with payload:', requestPayload);
       
       const response = await axios.post(`${apiUrlBase}/get_regeneration_counts`, requestPayload);
-      setRegenerationCounts(response.data);
+      
+      // Update regeneration counts from response
+      setRegenerationCounts({
+        tables: response.data.tables,
+        columns: response.data.columns
+      });
+      
       onTaskUpdate(taskId, { status: 'completed' });
     } catch (error) {
       console.error('API Error:', error);
@@ -743,35 +745,33 @@ const GenerationPage: React.FC<GenerationPageProps> = ({ config, onTaskAdd, onTa
                       : "Get Objects for Regeneration Count"}
                   </Button>
                   
-                  {regenerationCounts.tables > 0 || regenerationCounts.columns > 0 ? (
-                    <Card sx={{ mt: 2 }}>
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom>
-                          {selectedForRegeneration.length > 0 && selectedForRegeneration[0]
-                            ? "Filtered objects for regeneration:"
-                            : "Objects marked for regeneration:"}
-                        </Typography>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-around', mt: 2 }}>
-                          <Box sx={{ textAlign: 'center' }}>
-                            <Typography variant="h4" color="primary">
-                              {regenerationCounts.tables}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              Tables
-                            </Typography>
-                          </Box>
-                          <Box sx={{ textAlign: 'center' }}>
-                            <Typography variant="h4" color="primary">
-                              {regenerationCounts.columns}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              Columns
-                            </Typography>
-                          </Box>
+                  <Card sx={{ mt: 2 }}>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        {selectedForRegeneration.length > 0 && selectedForRegeneration[0]
+                          ? "Filtered objects for regeneration:"
+                          : "Objects marked for regeneration:"}
+                      </Typography>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-around', mt: 2 }}>
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="h4" color="primary">
+                            {regenerationCounts.tables}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Tables
+                          </Typography>
                         </Box>
-                      </CardContent>
-                    </Card>
-                  ) : null}
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="h4" color="primary">
+                            {regenerationCounts.columns}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Columns
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </CardContent>
+                  </Card>
                 </Box>
 
                 {error && error.includes('regeneration') && (

@@ -503,19 +503,12 @@ def get_regeneration_counts(
         dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}" 
         logger.info(f"Getting regeneration counts for dataset: {dataset_fqn}")
         
-        # Use the utility method to build the effective query
-        # This ensures the dataset_fqn is always included in the query
-        
-        if search_query:
-            effective_query = client._review_ops.build_search_query_for_regeneration(dataset_fqn, search_query)
-        else:
-            effective_query = client._review_ops.build_search_query_for_regeneration(dataset_fqn)
-            
-        logger.info(f"Final query for review items: {effective_query}")
-        tables = client._review_ops.get_review_items_for_dataset(dataset_fqn, effective_query)
-        tables_count = len(tables.get("data", {}).get("items", []))
+        # Use _list_tables_in_dataset_for_regeneration to get tables marked for regeneration
+        tables = client._table_ops._list_tables_in_dataset_for_regeneration(dataset_fqn)
+        tables_count = len(tables)
         
         logger.info(f"Found {tables_count} tables marked for regeneration")
+        
         return RegenerationCounts(
             tables=tables_count,
             columns=0  # TODO: Implement column counting
@@ -630,32 +623,22 @@ def regenerate_all(
         )
         
         dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
-        logger.info(f"Getting all items marked for regeneration in dataset: {dataset_fqn}")
+        logger.info(f"Regenerating all marked items in dataset: {dataset_fqn}")
         
-        # Use the utility method to build the effective query
-        # This ensures the dataset_fqn is always included in the query
-    
-        effective_query = client._review_ops.build_search_query_for_regeneration(dataset_fqn)
-        logger.info(f"Final query for review items: {effective_query}")
+        # Set regeneration flag to True
+        client._client_options._regenerate = True
         
-        # Get all items marked for regeneration
-        tables = client._review_ops.get_review_items_for_dataset(dataset_fqn, effective_query)
-        items = tables.get("data", {}).get("items", [])
+        # Call generate_dataset_tables_descriptions with regeneration flag
+        result = client.generate_dataset_tables_descriptions(
+            dataset_fqn=dataset_fqn,
+            strategy=dataset_settings.strategy,
+            documentation_csv_uri=dataset_settings.documentation_csv_uri
+        )
         
-        logger.info(f"Found {len(items)} items marked for regeneration")
+        # Reset regeneration flag
+        client._client_options._regenerate = False
         
-        results = []
-        for item in items:
-            item_name = item.get("name", "")
-            logger.info(f"Regenerating item: {item_name}")
-            
-            # TODO: Implement actual regeneration logic here
-            # This is a placeholder - you'll need to implement the actual regeneration
-            # based on your application's requirements
-            
-            results.append({"table": item_name, "status": "regenerated"})
-        
-        return {"regenerated_objects": results}
+        return {"message": "All marked items regenerated successfully"}
     except Exception as e:
         logger.error(f"Error in regenerate_all: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
