@@ -206,6 +206,9 @@ class ColumnOperations:
                         self._client._dataplex_ops.update_column_draft_description(table_fqn, column.name, column_description)
                     updated_columns.append(column)
                     logger.info(f"Generated column description: {column_description}.")
+                    if self._client._client_options._regenerate:
+                        self._client._dataplex_ops.mark_column_as_regenerated(table_fqn, column.name)
+                        logger.info(f"Marked column {column.name} as regenerated in Dataplex catalog.")
                     
                 else:
                     updated_schema.append(column)

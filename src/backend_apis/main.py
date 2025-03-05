@@ -628,8 +628,8 @@ def regenerate_all(
         # Set regeneration flag to True
         client._client_options._regenerate = True
         
-        # Call generate_dataset_tables_descriptions with regeneration flag
-        result = client.generate_dataset_tables_descriptions(
+        # Call generate_dataset_tables_columns_descriptions with regeneration flag
+        result = client.generate_dataset_tables_columns_descriptions(
             dataset_fqn=dataset_fqn,
             strategy=dataset_settings.strategy,
             documentation_csv_uri=dataset_settings.documentation_csv_uri
@@ -638,7 +638,7 @@ def regenerate_all(
         # Reset regeneration flag
         client._client_options._regenerate = False
         
-        return {"message": "All marked items regenerated successfully"}
+        return {"message": "All marked items (tables and columns) regenerated successfully"}
     except Exception as e:
         logger.error(f"Error in regenerate_all: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")

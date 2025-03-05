@@ -15,7 +15,6 @@ export interface MetadataItem {
     certified?: boolean;
     user_who_certified?: string;
     generation_date?: string;
-    to_be_regenerated?: boolean;
     external_document_uri?: string;
   };
   profile?: {
@@ -34,8 +33,7 @@ export interface MetadataItem {
     avg_length?: number;
   };
   externalDocumentUri?: string;
-  toBeRegenerated?: boolean;
-  'to-be-regenerated'?: boolean;
+  markedForRegeneration?: boolean;
   isMarkingForRegeneration?: boolean;
   parentTableId?: string;
   isHtml?: boolean;

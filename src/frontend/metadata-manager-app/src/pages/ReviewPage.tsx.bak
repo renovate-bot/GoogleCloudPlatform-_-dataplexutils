@@ -636,7 +636,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           item = {
             ...tableItem.currentColumn,
             id: itemId,
-            type: 'column' as const
+            type: 'column'
           };
         } else {
           // Try to find the column in the table's tagged columns
@@ -645,7 +645,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
             item = {
               ...column,
               id: itemId,
-              type: 'column' as const,
+              type: 'column',
               status: 'draft',
               lastModified: new Date().toISOString()
             };
@@ -656,7 +656,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
         if (!item) {
           item = {
             id: itemId,
-            type: 'column' as const,
+            type: 'column',
             name: columnName,
             isMarkingForRegeneration: false,
             status: 'draft',
@@ -718,24 +718,17 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
 
       console.log('Mark for regeneration response:', response.data);
 
-      // Instead of clearing the entire cache for this item, just update the regeneration status
-      // This allows us to keep using the cached data for navigation
+      // Clear the cache for this item to ensure we get fresh data next time it's loaded
+      // but don't trigger a refresh now (it takes too long)
+      setDetailsCache(prev => ({
+        ...prev,
+        [itemId]: undefined
+      }));
+
+      // Instead of refreshing the item details, just update the UI state
+      // This avoids the long wait for regeneration
       if (isColumn) {
         // For columns, update both the column and the parent table UI
-        
-        // Update the column in the cache
-        if (detailsCache[itemId]) {
-          setDetailsCache(prev => ({
-            ...prev,
-            [itemId]: {
-              ...prev[itemId],
-              markedForRegeneration: true,
-              isMarkingForRegeneration: false
-            }
-          }));
-        }
-        
-        // Update the column in the state
         dispatch({
           type: 'UPDATE_ITEM',
           payload: { 
@@ -765,35 +758,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           });
         }
       } else {
-        // For tables, update the table UI state and all its columns
-        
-        // Update the table in the cache
-        if (detailsCache[itemId]) {
-          setDetailsCache(prev => {
-            const updatedCache = { ...prev };
-            
-            // Update the table
-            updatedCache[itemId] = {
-              ...prev[itemId],
-              markedForRegeneration: true,
-              isMarkingForRegeneration: false
-            };
-            
-            // Also update all columns of this table in the cache
-            Object.keys(prev).forEach(key => {
-              if (key.startsWith(itemId + '#column.')) {
-                updatedCache[key] = {
-                  ...prev[key],
-                  tableMarkedForRegeneration: true
-                };
-              }
-            });
-            
-            return updatedCache;
-          });
-        }
-        
-        // Update the table in the state
+        // For tables, just update the table UI state without full refresh
         dispatch({
           type: 'UPDATE_ITEM',
           payload: { 
@@ -804,6 +769,19 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
             } 
           }
         });
+        
+        // Also update the in-memory cache to reflect this change
+        if (detailsCache[itemId]) {
+          const updatedCache = {
+            ...detailsCache,
+            [itemId]: {
+              ...detailsCache[itemId],
+              markedForRegeneration: true,
+              isMarkingForRegeneration: false
+            }
+          };
+          setDetailsCache(updatedCache);
+        }
       }
 
       setError(null);
@@ -1430,178 +1408,170 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   };
 
   const handleNextColumn = () => {
-    if (currentColumnIndex < taggedColumns.length - 1) {
-      const nextColumnIndex = currentColumnIndex + 1;
-      const nextColumn = taggedColumns[nextColumnIndex];
-      
-      // Extract the table ID from the column name
-      const tableParts = nextColumn.name.split('.');
-      tableParts.pop(); // Remove the column name part
-      const tableId = `${tableParts.join('.')}#table`;
-      
-      // Create the column ID
-      const columnName = nextColumn.name.split('.').pop();
-      const columnId = `${tableId}#column.${columnName}`;
-      
-      console.log('Navigating to next column:', { 
-        columnId, 
-        columnName, 
-        tableId, 
-        nextColumnIndex 
+    // Defensive checks with detailed logging
+    if (!currentItemId) {
+      console.log('Cannot navigate: currentItemId is not set');
+      return;
+    }
+    
+    if (taggedColumns.length === 0) {
+      console.log('Cannot navigate: no tagged columns available');
+      return;
+    }
+    
+    if (currentColumnIndex >= taggedColumns.length - 1) {
+      console.log('Cannot navigate: already at the last column', currentColumnIndex, taggedColumns.length);
+      return;
+    }
+
+    // Get the current table ID, whether we're viewing a table or a column
+    const currentItem = items[currentItemIndex];
+    const tableId = currentItem.type === 'table' ? currentItem.id : currentItem.id.split('#')[0];
+    
+    // Ensure we're working with the correct table
+    if (tableId !== currentItemId) {
+      console.log('Table ID mismatch - updating currentItemId:', tableId, 'was:', currentItemId);
+      // Force update the currentItemId to match the current table
+      setCurrentItemId(tableId);
+    }
+
+    // Always use the next index rather than relying on the current state
+    const nextColumnIndex = currentColumnIndex + 1;
+    const nextColumn = taggedColumns[nextColumnIndex];
+    
+    if (!nextColumn) {
+      console.log('No next column found at index:', nextColumnIndex);
+      return;
+    }
+    
+    const nextColumnId = `${tableId}#column.${nextColumn.name.split('.').pop()}`;
+    console.log('Navigating to next column:', nextColumnId, 'index:', nextColumnIndex);
+    
+    // Create a temporary column item for display
+    const columnItem: MetadataItem = {
+      id: nextColumnId,
+      type: 'column',
+      name: nextColumn.name,
+      status: nextColumn.status || 'draft',
+      currentDescription: nextColumn.currentDescription || '',
+      draftDescription: nextColumn.draftDescription || '',
+      comments: nextColumn.comments || [],
+      parentTableId: tableId,
+      lastModified: new Date().toISOString(),
+      isHtml: false,
+      markedForRegeneration: nextColumn.markedForRegeneration || false,
+      isMarkingForRegeneration: nextColumn.isMarkingForRegeneration || false
+    };
+    
+    // Update column index
+    setCurrentColumnIndex(nextColumnIndex);
+    
+    // Use cached data if available
+    if (detailsCache[nextColumnId]) {
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: tableId, // Update the current table item
+          updates: {
+            currentColumn: columnItem
+          }
+        }
       });
       
-      // Update the current column index
-      setCurrentColumnIndex(nextColumnIndex);
-      
-      // Find the parent table item
-      const tableItem = items.find(item => item.id === tableId);
-      if (!tableItem) {
-        console.error('Parent table not found for column:', nextColumn.name);
-        return;
-      }
-      
-      // Use cached column data if available
-      if (detailsCache[columnId]) {
-        console.log('Using cached column data for:', columnId);
-        const cachedColumn = detailsCache[columnId];
-        
-        // Update the table with the new current column
-        const updatedTable = {
-          ...tableItem,
-          currentColumn: {
-            ...cachedColumn,
-            id: columnId,
-            type: 'column' as const
-          }
-        };
-        
-        // Update the state
-        dispatch({
-          type: 'UPDATE_ITEM',
-          payload: {
-            id: tableId,
-            updates: updatedTable
-          }
-        });
-      } else {
-        // If not in cache, construct the column from the tagged columns data
-        console.log('Constructing column data from tagged columns for:', columnId);
-        const columnData = {
-          ...nextColumn,
-          id: columnId,
-          type: 'column' as const,
-          tableMarkedForRegeneration: tableItem.markedForRegeneration || false
-        };
-        
-        // Update the table with the new current column
-        const updatedTable = {
-          ...tableItem,
-          currentColumn: columnData
-        };
-        
-        // Update the state
-        dispatch({
-          type: 'UPDATE_ITEM',
-          payload: {
-            id: tableId,
-            updates: updatedTable
-          }
-        });
-        
-        // Also cache this column data for future use
-        setDetailsCache(prev => ({
-          ...prev,
-          [columnId]: columnData
-        }));
-      }
+      // Also update the column's data separately
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: nextColumnId,
+          updates: detailsCache[nextColumnId]
+        }
+      });
+    } else {
+      loadItemDetails(nextColumnId);
     }
   };
 
   const handlePrevColumn = () => {
-    if (currentColumnIndex > 0) {
-      const prevColumnIndex = currentColumnIndex - 1;
-      const prevColumn = taggedColumns[prevColumnIndex];
-      
-      // Extract the table ID from the column name
-      const tableParts = prevColumn.name.split('.');
-      tableParts.pop(); // Remove the column name part
-      const tableId = `${tableParts.join('.')}#table`;
-      
-      // Create the column ID
-      const columnName = prevColumn.name.split('.').pop();
-      const columnId = `${tableId}#column.${columnName}`;
-      
-      console.log('Navigating to previous column:', { 
-        columnId, 
-        columnName, 
-        tableId, 
-        prevColumnIndex 
+    // Defensive checks with detailed logging
+    if (!currentItemId) {
+      console.log('Cannot navigate: currentItemId is not set');
+      return;
+    }
+    
+    if (taggedColumns.length === 0) {
+      console.log('Cannot navigate: no tagged columns available');
+      return;
+    }
+    
+    if (currentColumnIndex <= 0) {
+      console.log('Cannot navigate: already at the first column', currentColumnIndex);
+      return;
+    }
+
+    // Get the current table ID, whether we're viewing a table or a column
+    const currentItem = items[currentItemIndex];
+    const tableId = currentItem.type === 'table' ? currentItem.id : currentItem.id.split('#')[0];
+    
+    // Ensure we're working with the correct table
+    if (tableId !== currentItemId) {
+      console.log('Table ID mismatch - updating currentItemId:', tableId, 'was:', currentItemId);
+      // Force update the currentItemId to match the current table
+      setCurrentItemId(tableId);
+    }
+
+    // Always use the previous index rather than relying on the current state
+    const prevColumnIndex = currentColumnIndex - 1;
+    const prevColumn = taggedColumns[prevColumnIndex];
+    
+    if (!prevColumn) {
+      console.log('No previous column found at index:', prevColumnIndex);
+      return;
+    }
+    
+    const prevColumnId = `${tableId}#column.${prevColumn.name.split('.').pop()}`;
+    console.log('Navigating to previous column:', prevColumnId, 'index:', prevColumnIndex);
+    
+    // Create a temporary column item for display
+    const columnItem: MetadataItem = {
+      id: prevColumnId,
+      type: 'column',
+      name: prevColumn.name,
+      status: prevColumn.status || 'draft',
+      currentDescription: prevColumn.currentDescription || '',
+      draftDescription: prevColumn.draftDescription || '',
+      comments: prevColumn.comments || [],
+      parentTableId: tableId,
+      lastModified: new Date().toISOString(),
+      isHtml: false,
+      markedForRegeneration: prevColumn.markedForRegeneration || false,
+      isMarkingForRegeneration: prevColumn.isMarkingForRegeneration || false
+    };
+    
+    // Update column index
+    setCurrentColumnIndex(prevColumnIndex);
+    
+    // Use cached data if available
+    if (detailsCache[prevColumnId]) {
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: tableId, // Update the current table item
+          updates: {
+            currentColumn: columnItem
+          }
+        }
       });
       
-      // Update the current column index
-      setCurrentColumnIndex(prevColumnIndex);
-      
-      // Find the parent table item
-      const tableItem = items.find(item => item.id === tableId);
-      if (!tableItem) {
-        console.error('Parent table not found for column:', prevColumn.name);
-        return;
-      }
-      
-      // Use cached column data if available
-      if (detailsCache[columnId]) {
-        console.log('Using cached column data for:', columnId);
-        const cachedColumn = detailsCache[columnId];
-        
-        // Update the table with the new current column
-        const updatedTable = {
-          ...tableItem,
-          currentColumn: {
-            ...cachedColumn,
-            id: columnId,
-            type: 'column' as const
-          }
-        };
-        
-        // Update the state
-        dispatch({
-          type: 'UPDATE_ITEM',
-          payload: {
-            id: tableId,
-            updates: updatedTable
-          }
-        });
-      } else {
-        // If not in cache, construct the column from the tagged columns data
-        console.log('Constructing column data from tagged columns for:', columnId);
-        const columnData = {
-          ...prevColumn,
-          id: columnId,
-          type: 'column' as const,
-          tableMarkedForRegeneration: tableItem.markedForRegeneration || false
-        };
-        
-        // Update the table with the new current column
-        const updatedTable = {
-          ...tableItem,
-          currentColumn: columnData
-        };
-        
-        // Update the state
-        dispatch({
-          type: 'UPDATE_ITEM',
-          payload: {
-            id: tableId,
-            updates: updatedTable
-          }
-        });
-        
-        // Also cache this column data for future use
-        setDetailsCache(prev => ({
-          ...prev,
-          [columnId]: columnData
-        }));
-      }
+      // Also update the column's data separately
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: {
+          id: prevColumnId,
+          updates: detailsCache[prevColumnId]
+        }
+      });
+    } else {
+      loadItemDetails(prevColumnId);
     }
   };
 

@@ -209,18 +209,25 @@ class TableOperations:
             table_description = f"{constants['OUTPUT_CLAUSES']['AI_WARNING']}{table_description}"
         
         # Update table
+        # If we are not staging for review, we update the table in BigQuery and Dataplex catalog
         if not self._client._client_options._stage_for_review:
             self._client._bigquery_ops.update_table_description(table_fqn, table_description)
             if self._client._client_options._persist_to_dataplex_catalog:
                 self._client._dataplex_ops.update_table_dataplex_description(table_fqn, table_description)
                 logger.info(f"Table description updated for table {table_fqn} in Dataplex catalog")
+            
         else:
+            # If we are staging for review, we update the table in Dataplex catalog
             if not self._client._dataplex_ops._check_if_exists_aspect_type(constants["ASPECT_TEMPLATE"]["name"]):
                 logger.info(f"Aspect type {constants['ASPECT_TEMPLATE']['name']} not exists. Attempting to create it")
                 self._client._dataplex_ops._create_aspect_type(constants["ASPECT_TEMPLATE"]["name"])
                 logger.info(f"Aspect type {constants['ASPECT_TEMPLATE']['name']} created")
             self._client._dataplex_ops.update_table_draft_description(table_fqn, table_description)
             logger.info(f"Table {table_fqn} will not be updated in BigQuery.")
+        # If we were regenerating a table, we mark it as regerated
+        if self._client._client_options._regenerate:
+            self._client._dataplex_ops.mark_table_as_regenerated(table_fqn)
+            logger.info(f"Table {table_fqn} marked as regenerated")
         return {
             "status": "success",
             "message": "Table description generated successfully",
