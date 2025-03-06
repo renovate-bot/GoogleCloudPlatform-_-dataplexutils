@@ -40,6 +40,26 @@ class ColumnOperations:
         """Initialize with reference to main client."""
         self._client = client
 
+    def regenerate_dataset_tables_columns_descriptions(self, dataset_fqn, strategy="NAIVE", documentation_csv_uri=None):
+        """Regenerates metadata on the columns of tables in a whole dataset.
+
+        Args:
+            dataset_fqn: The fully qualified name of the dataset
+            strategy: The strategy to use for generation
+            documentation_csv_uri: Optional URI to documentation CSV
+        """
+        try:
+            self._client._client_options._use_human_comments = True
+            self._client._client_options._regenerate = True
+            self.generate_dataset_tables_columns_descriptions(dataset_fqn, strategy, documentation_csv_uri)
+            
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+
+
+
     def generate_dataset_tables_columns_descriptions(self, dataset_fqn, strategy="NAIVE", documentation_csv_uri=None):
         """Generates metadata on the columns of tables in a whole dataset.
 
@@ -97,16 +117,19 @@ class ColumnOperations:
                         raise ValueError(f"Table {table[0]} not found in dataset {dataset_fqn}.")
                     # Generate columns for this table
                     self.generate_columns_descriptions(table[0], table[1])
+                    self._client._table_ops.generate_table_description(table[0])
 
                 tables_from_uri_first_elements = [table[0] for table in tables_from_uri]
                 for table in tables:
                     if table not in tables_from_uri_first_elements:
                         self.generate_columns_descriptions(table)
+                        self._client._table_ops.generate_table_description(table)
             
             if int_strategy in [constants["GENERATION_STRATEGY"]["NAIVE"], constants["GENERATION_STRATEGY"]["RANDOM"], constants["GENERATION_STRATEGY"]["ALPHABETICAL"]]:
                 tables_sorted = self._client._table_ops._order_tables_to_strategy(tables, int_strategy)
                 for table in tables_sorted:
                     self.generate_columns_descriptions(table)
+                    self._client._table_ops.generate_table_description(table)
 
         except Exception as e:
             logger.error(f"Exception: {e}.")
@@ -206,9 +229,9 @@ class ColumnOperations:
                         self._client._dataplex_ops.update_column_draft_description(table_fqn, column.name, column_description)
                     updated_columns.append(column)
                     logger.info(f"Generated column description: {column_description}.")
-                    if self._client._client_options._regenerate:
-                        self._client._dataplex_ops.mark_column_as_regenerated(table_fqn, column.name)
-                        logger.info(f"Marked column {column.name} as regenerated in Dataplex catalog.")
+                   # if self._client._client_options._regenerate:
+                   #     self._client._dataplex_ops.mark_column_as_regenerated(table_fqn, column.name)
+                   #     logger.info(f"Marked column {column.name} as regenerated in Dataplex catalog.")
                     
                 else:
                     updated_schema.append(column)
@@ -218,9 +241,9 @@ class ColumnOperations:
                 self._client._bigquery_ops.update_table_schema(table_fqn, updated_schema)
             
             if self._client._client_options._regenerate:
-                for column in updated_columns:
-                    logger.info(f"Updating table {table_fqn} column {column.name} as regenerated")
-                    self._client._dataplex_ops.update_column_metadata_as_regenerated(table_fqn, column.name)
+                for column in updated_columns:                    
+                    self._client._dataplex_ops.mark_column_as_regenerated(table_fqn, column.name)
+                    logger.info(f"Marked table {table_fqn} column {column.name} as regenerated")
 
         except Exception as e:
             logger.error(f"Update of column description table {table_fqn} failed.")

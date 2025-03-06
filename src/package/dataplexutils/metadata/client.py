@@ -125,6 +125,9 @@ class Client:
     def generate_dataset_tables_columns_descriptions(self, dataset_fqn, strategy="NAIVE", documentation_csv_uri=None):
         return self._column_ops.generate_dataset_tables_columns_descriptions(dataset_fqn, strategy, documentation_csv_uri)
 
+    def regenerate_dataset_tables_columns_descriptions(self, dataset_fqn, strategy="NAIVE", documentation_csv_uri=None):
+        return self._column_ops.regenerate_dataset_tables_columns_descriptions(dataset_fqn, strategy, documentation_csv_uri)
+
     def reject_review_item(self, item_id: str):
         return self._review_ops.reject_review_item(item_id)
         

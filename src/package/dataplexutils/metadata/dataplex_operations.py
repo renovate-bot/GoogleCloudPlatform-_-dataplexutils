@@ -560,6 +560,42 @@ class DataplexOperations:
             logger.error(f"Exception: {e}.")
             raise e
 
+    def get_table_comment(self, table_fqn, comment_number=None):
+        """Gets comments for a table.
+
+        Args:
+            table_fqn (str): The fully qualified name of the table
+            comment_number (int, optional): Specific comment number to retrieve
+
+        Returns:
+            list: List of comments or specific comment if comment_number provided
+        """
+        try:
+            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
+
+            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
+            aspect_type = f"""projects/{self._client._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""
+            aspect_types = [aspect_type]
+
+            request = dataplex_v1.GetEntryRequest(name=entry_name, view=dataplex_v1.EntryView.CUSTOM, aspect_types=aspect_types)
+            entry = client.get_entry(request=request)
+
+            comments = []
+            for aspect_key, aspect in entry.aspects.items():
+                if aspect_key.endswith(f"""global.{constants["ASPECT_TEMPLATE"]["name"]}""") and aspect.path == "":
+                    if "human-comments" in aspect.data:
+                        if comment_number is None:
+                            comments.extend(aspect.data["human-comments"])
+                        else:
+                            comments.append(aspect.data["human-comments"][comment_number])
+
+            return comments
+
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
     def _get_dataset_location(self, table_fqn):
         """Gets the location of a dataset.
 

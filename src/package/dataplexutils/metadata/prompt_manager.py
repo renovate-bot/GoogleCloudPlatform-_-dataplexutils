@@ -65,6 +65,7 @@ class PromptManager:
                     table_description_prompt
                     + constants["PROMPTS"]["TABLE_DESCRIPTION_PROMPT_DOCUMENT"]
                 )
+                
             if self._client_options._use_human_comments:
                 table_description_prompt = (
                     table_description_prompt
@@ -88,6 +89,8 @@ class PromptManager:
             table_description_prompt = (
                 table_description_prompt + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
             )
+
+            logger.info(f"Table description prompt: {table_description_prompt}")
             return table_description_prompt
         except Exception as e:
             logger.error(f"Exception: {e}.")
@@ -139,6 +142,7 @@ class PromptManager:
             column_description_prompt = (
                 column_description_prompt + constants["PROMPTS"]["OUTPUT_FORMAT_PROMPT"]
             )
+            logger.info(f"Column description prompt: {column_description_prompt}")
             return column_description_prompt
         except Exception as e:
             logger.error(f"Exception: {e}.")

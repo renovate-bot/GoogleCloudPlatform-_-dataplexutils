@@ -76,8 +76,9 @@ Provide information how is that table is calculated from originating tables, men
 which tables are joined, what data is filtered, what are most sifgnificant data transformations.
 If there's no lineage information then second paragraph is ommited.
 """
+
 TABLE_DESCRIPTION_PROMPT_HUMAN_COMMENTS = """
-Take into consideration the comments provided by the user about this table. They are more important than other information: {human_comments}
+Take into consideration the comments provided by the the domain expert in a form of a comments. They are extremely important and provide true validated input about the table: {human_comments}
 """
 
 OUTPUT_FORMAT_PROMPT = """

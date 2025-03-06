@@ -629,7 +629,7 @@ def regenerate_all(
         client._client_options._regenerate = True
         
         # Call generate_dataset_tables_columns_descriptions with regeneration flag
-        result = client.generate_dataset_tables_columns_descriptions(
+        result = client.regenerate_dataset_tables_columns_descriptions(
             dataset_fqn=dataset_fqn,
             strategy=dataset_settings.strategy,
             documentation_csv_uri=dataset_settings.documentation_csv_uri

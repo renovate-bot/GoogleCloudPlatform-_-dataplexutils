@@ -5,54 +5,22 @@ import {
   Toolbar,
   IconButton,
   Typography,
-  InputBase,
   Theme,
 } from '@mui/material';
-import { styled, alpha } from '@mui/material/styles';
+import { styled } from '@mui/material/styles';
 import MenuIcon from '@mui/icons-material/Menu';
-import SearchIcon from '@mui/icons-material/Search';
 import HelpIcon from '@mui/icons-material/Help';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import TaskTracker, { Task } from '../TaskTracker';
 
-const Search = styled('div')(({ theme }: { theme: Theme }) => ({
-  position: 'relative',
-  borderRadius: theme.shape.borderRadius,
-  backgroundColor: alpha(theme.palette.common.white, 0.15),
-  '&:hover': {
-    backgroundColor: alpha(theme.palette.common.white, 0.25),
-  },
-  marginRight: theme.spacing(2),
-  marginLeft: 0,
-  width: '100%',
-  [theme.breakpoints.up('sm')]: {
-    marginLeft: theme.spacing(3),
-    width: 'auto',
-  },
-}));
-
-const SearchIconWrapper = styled('div')(({ theme }: { theme: Theme }) => ({
-  padding: theme.spacing(0, 2),
-  height: '100%',
-  position: 'absolute',
-  pointerEvents: 'none',
+// Logo container styling
+const LogoContainer = styled('div')(({ theme }: { theme: Theme }) => ({
   display: 'flex',
   alignItems: 'center',
-  justifyContent: 'center',
-}));
-
-const StyledInputBase = styled(InputBase)(({ theme }: { theme: Theme }) => ({
-  color: 'inherit',
-  width: '100%',
-  '& .MuiInputBase-input': {
-    padding: theme.spacing(1, 1, 1, 0),
-    paddingLeft: `calc(1em + ${theme.spacing(4)})`,
-    transition: theme.transitions.create('width'),
-    width: '100%',
-    [theme.breakpoints.up('md')]: {
-      width: '20ch',
-    },
-  },
+  marginRight: theme.spacing(2),
+  marginLeft: theme.spacing(1),
+  height: '40px',
+  width: '40px',
 }));
 
 interface TopNavBarProps {
@@ -82,6 +50,13 @@ const TopNavBar: React.FC<TopNavBarProps> = ({ tasks }) => {
         >
           <MenuIcon />
         </IconButton>
+        
+        {/* Logo placeholder */}
+        <LogoContainer>
+          {/* Logo can be placed here */}
+          {/* Example: <img src="/path/to/logo.png" alt="Logo" style={{ height: '100%' }} /> */}
+        </LogoContainer>
+        
         <Typography
           variant="h6"
           noWrap
@@ -90,16 +65,6 @@ const TopNavBar: React.FC<TopNavBarProps> = ({ tasks }) => {
         >
           Metadata Manager
         </Typography>
-
-        <Search>
-          <SearchIconWrapper>
-            <SearchIcon />
-          </SearchIconWrapper>
-          <StyledInputBase
-            placeholder="Search…"
-            inputProps={{ 'aria-label': 'search' }}
-          />
-        </Search>
         
         <Box sx={{ flexGrow: 1 }} />
         

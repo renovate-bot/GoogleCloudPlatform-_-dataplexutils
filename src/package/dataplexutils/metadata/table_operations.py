@@ -185,6 +185,11 @@ class TableOperations:
 
         if documentation_uri == "":
             documentation_uri = None
+            
+        # Get human comments if enabled
+        if self._client._client_options._use_human_comments and human_comments is None:
+            logger.info(f"Getting human comments for table {table_fqn}.")
+            human_comments = self._client._dataplex_ops.get_table_comment(table_fqn)
 
         # Get prompt
         prompt_manager = PromptManager(
