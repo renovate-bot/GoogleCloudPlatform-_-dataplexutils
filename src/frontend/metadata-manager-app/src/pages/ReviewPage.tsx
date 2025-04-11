@@ -96,8 +96,6 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   const [currentColumnIndex, setCurrentColumnIndex] = useState<number>(-1);
   const [isColumnView, setIsColumnView] = useState(false);
   const listContainerRef = useRef<HTMLDivElement>(null);
-  const [isNearBottom, setIsNearBottom] = useState(false);
-  const [itemToPreload, setItemToPreload] = useState<string | null>(null);
   const [notification, setNotification] = useState<{ message: string; severity: 'success' | 'error' | 'info'; loading: boolean } | null>(null);
 
   // Initialize API URL
@@ -174,505 +172,135 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   // Load items if not loaded
   useEffect(() => {
     if (apiUrlBase && config.project_id && !hasLoadedItems) {
-      setIsLoading(true);
-      fetchReviewItems().finally(() => {
-        setIsLoading(false);
+      setIsLoading(true); // Set main loading true
+      fetchReviewItems().then(async (success) => { // make async to await loadItemDetails
+        if (success && viewMode === 'review' && state.items.length > 0) {
+          // Load initial item details if in review mode after fetch
+          try {
+            setIsLoadingDetails(true);
+            await loadItemDetails(state.items[0].id); // Not a forceRefresh
+            // Preload after successful load
+            if (state.items.length > 1) {
+              preloadNextItem(0);
+            }
+          } catch (e) {
+            console.error("Error loading initial item details:", e);
+            setError("Failed to load initial item details");
+          } finally {
+            setIsLoadingDetails(false); // Unset details loading
+          }
+        }
+      }).catch((e) => {
+          console.error("Error fetching initial items:", e);
+          setError("Failed to fetch initial review items");
+      }).finally(() => {
+        setIsLoading(false); // Unset main loading
         dispatch({ type: 'SET_HAS_LOADED', payload: true });
       });
     }
-  }, [apiUrlBase, config.project_id, hasLoadedItems]);
-
-  // Add a scroll event handler effect
-  useEffect(() => {
-    const handleScroll = () => {
-      if (viewMode === 'list' && listContainerRef.current) {
-        const container = listContainerRef.current;
-        const { scrollTop, scrollHeight, clientHeight } = container;
-        
-        // Check if user has scrolled to near the bottom (within 300px)
-        const isNearingBottom = scrollHeight - scrollTop - clientHeight < 300;
-        
-        // Only trigger preload when we first reach near the bottom
-        if (isNearingBottom && !isNearBottom) {
-          setIsNearBottom(true);
-          
-          // Find visible items and preload the next item after the last visible one
-          // This is a simple implementation - in a real app, you might need 
-          // more sophisticated intersection detection
-          const visibleItems = items.slice(
-            Math.max(0, currentItemIndex - 2),
-            Math.min(items.length, currentItemIndex + 5)
-          );
-          
-          if (visibleItems.length > 0) {
-            const lastVisibleItemIndex = items.findIndex(item => 
-              item.id === visibleItems[visibleItems.length - 1].id
-            );
-            
-            if (lastVisibleItemIndex !== -1 && lastVisibleItemIndex < items.length - 1) {
-              console.log('Preloading item after scrolling near bottom');
-              // Just mark the item for preloading
-              const nextIndex = lastVisibleItemIndex + 1;
-              if (nextIndex < items.length) {
-                const nextItem = items[nextIndex];
-                // Only preload if not already in cache
-                if (!detailsCache[nextItem.id]) {
-                  // We'll mark this item for preloading
-                  setItemToPreload(nextItem.id);
-                }
-              }
-            }
-          }
-        } else if (!isNearingBottom && isNearBottom) {
-          // Reset the flag when we're no longer near the bottom
-          setIsNearBottom(false);
-        }
-      }
-    };
-    
-    // Get the container element to attach the scroll event
-    const container = listContainerRef.current;
-    if (container) {
-      container.addEventListener('scroll', handleScroll);
-    }
-    
-    return () => {
-      if (container) {
-        container.removeEventListener('scroll', handleScroll);
-      }
-    };
-  }, [viewMode, currentItemIndex, isNearBottom, items, detailsCache]);
-
-  // Add an effect to handle preloading when itemToPreload changes
-  useEffect(() => {
-    if (itemToPreload && !detailsCache[itemToPreload]) {
-        console.log('Preloading item from state:', itemToPreload);
-        // This will be defined by the time this effect runs
-        loadItemDetails(itemToPreload, false)
-          .then(() => {
-            console.log('Successfully preloaded item:', itemToPreload);
-            setItemToPreload(null);
-          })
-          .catch(error => {
-            console.error('Error preloading item:', error);
-            setItemToPreload(null);
-          });
-    }
-  }, [itemToPreload, detailsCache]);
+  // Corrected dependencies: dispatch and state.items.length (to trigger load after items arrive)
+  }, [apiUrlBase, config.project_id, hasLoadedItems, viewMode, dispatch, state.items.length]);
 
   const handleViewModeChange = (event: React.MouseEvent<HTMLElement>, newMode: 'list' | 'review' | null) => {
     if (newMode) {
       dispatch({ type: 'SET_VIEW_MODE', payload: newMode });
+      // If switching to review mode and items exist, load the current (likely first) item
       if (newMode === 'review' && items.length > 0) {
-        // Only load details if not in cache
-        if (!detailsCache[items[currentItemIndex].id]) {
-          loadItemDetails(items[currentItemIndex].id);
+        const itemToLoad = items[currentItemIndex]; // Load current index
+        if (itemToLoad) {
+          // Load details if not already cached (loadItemDetails handles check)
+          const loadCurrentItem = async () => {
+            try {
+              setIsLoadingDetails(true);
+              await loadItemDetails(itemToLoad.id); // Not a forceRefresh
+            preloadNextItem(currentItemIndex);
+            } catch (e) {
+              console.error('Error loading details on view mode change:', e);
+              // setError handled by loadItemDetails
+            } finally {
+              setIsLoadingDetails(false);
+          }
+          };
+          loadCurrentItem();
+        }
+      }
+    }
+  };
+
+  const handleRefresh = async () => {
+    setError(null);
+    console.log('🔍 REFRESH START - Current state:', { viewMode, currentItemId });
+
+      if (viewMode === 'list') {
+      console.log('🔍 REFRESH - List mode');
+        setIsRefreshing(true);
+      try {
+        await fetchReviewItems();
+        setNotification({ message: 'Review list refreshed', severity: 'success', loading: false });
+        setTimeout(() => setNotification(null), 3000);
+      } catch (e) {
+        console.error('🔍 REFRESH - List mode error:', e);
+        setError('Failed to refresh review list');
+        setNotification({ message: 'Failed to refresh list', severity: 'error', loading: false });
+        setTimeout(() => setNotification(null), 5000);
+      } finally {
+        setIsRefreshing(false);
+      }
+      } else if (viewMode === 'review' && currentItemId) {
+      console.log('🔍 REFRESH - Review mode, refreshing current item:', currentItemId);
+      setNotification({ message: 'Refreshing current item metadata...', severity: 'info', loading: true });
+      // setIsLoadingDetails is set within loadItemDetails when forceRefresh=true
+
+      try {
+        const refreshedDetails = await loadItemDetails(currentItemId, true); // forceRefresh = true
+
+        if (refreshedDetails) {
+          console.log('🔍 REFRESH - Review mode completed for:', currentItemId);
+          setNotification({ message: 'Current item refreshed successfully', severity: 'success', loading: false });
+          setTimeout(() => setNotification(null), 3000);
+          // Preload next item
           if (currentItemIndex < items.length - 1) {
             preloadNextItem(currentItemIndex);
           }
-        }
-      }
-    }
-  };
-
-  // Update the handleRefresh function with detailed debugging
-  const handleRefresh = async () => {
-    console.log('🔍 REFRESH START - Current state:', {
-      viewMode,
-      currentItemId,
-      currentColumnIndex,
-      isColumnView,
-      isRefreshing
-    });
-    
-    try {
-      if (viewMode === 'list') {
-        // In list mode, just fetch the review items
-        console.log('🔍 REFRESH - List mode, setting isRefreshing to true');
-        setIsRefreshing(true);
-        await fetchReviewItems();
-        console.log('🔍 REFRESH - List mode completed, setting isRefreshing to false');
-        setIsRefreshing(false);
-      } else if (viewMode === 'review' && currentItemId) {
-        // In review mode, show a notification but don't set isRefreshing
-        // This prevents the screen from going blank
-        console.log('🔍 REFRESH - Review mode, NOT setting isRefreshing');
-        
-        // Show notification
-        setNotification({
-          message: 'Refreshing metadata in background...',
-          severity: 'info',
-          loading: true
-        });
-        
-        // Determine if we're viewing a column
-        const currentItem = items[currentItemIndex];
-        const isViewingColumn = Boolean(currentItem?.currentColumn) || currentItem?.type === 'column';
-        
-        console.log('🔍 REFRESH - Current view:', {
-          isViewingColumn,
-          currentItem: currentItem ? {
-            id: currentItem.id,
-            type: currentItem.type,
-            hasCurrentColumn: Boolean(currentItem.currentColumn)
-          } : null
-        });
-        
-        console.log('🔍 REFRESH - Starting background refresh for:', currentItemId);
-        
-        // Extract the base table ID if this is a column
-        const baseTableId = currentItemId.includes('#') ? currentItemId.split('#')[0] : currentItemId;
-        const standardTableId = `${baseTableId}#table`;
-        
-        try {
-          // Perform a background refresh without affecting navigation
-          console.log('🔍 REFRESH - Calling backgroundRefreshWithoutNavigation for:', standardTableId);
-          const result = await backgroundRefreshWithoutNavigation(standardTableId, isViewingColumn);
-          console.log('🔍 REFRESH - Background refresh completed with result:', result);
-          
-          // Show success notification
-          setNotification({
-            message: 'Metadata refreshed successfully',
-            severity: 'success',
-            loading: false
-          });
-          
-          // Clear notification after 3 seconds
-          setTimeout(() => setNotification(null), 3000);
-        } catch (error) {
-          console.error('🔍 REFRESH - Error during background refresh:', error);
-          
-          // Show error notification
-          setNotification({
-            message: 'Failed to refresh metadata',
-            severity: 'error',
-            loading: false
-          });
-        }
+        } else {
+          console.warn('🔍 REFRESH - Review mode: loadItemDetails returned null/error for', currentItemId);
+          // setError handled by loadItemDetails
+          setNotification({ message: 'Failed to refresh current item', severity: 'error', loading: false });
+          setTimeout(() => setNotification(null), 5000);
       }
     } catch (error) {
-      console.error('🔍 REFRESH - Error during refresh:', error);
+        // Catch errors from axios call itself if loadItemDetails fails internally
+        console.error('🔍 REFRESH - Review mode error during await:', error);
+        if (!error) { // Check if error object exists
+           setError('Failed to refresh current item details');
+        }
+        setNotification({ message: 'Error refreshing current item', severity: 'error', loading: false });
+        setTimeout(() => setNotification(null), 5000);
     } finally {
-      console.log('🔍 REFRESH END - Final state:', {
-        viewMode,
-        currentItemId,
-        currentColumnIndex,
-        isColumnView,
-        isRefreshing
-      });
-    }
-  };
-
-  // Update the backgroundRefreshWithoutNavigation function with detailed debugging
-  const backgroundRefreshWithoutNavigation = async (itemId: string, isViewingColumn = false) => {
-    console.log('🔍 BACKGROUND REFRESH START - Current state:', {
-      itemId,
-        currentItemId,
-        currentColumnIndex,
-        isColumnView,
-      viewMode,
-      isRefreshing,
-      isViewingColumn
-    });
-    
-    // Store current state to restore later
-    const currentState = {
-      currentItemId,
-      currentColumnIndex,
-      isColumnView,
-      viewMode,
-      isViewingColumn
-    };
-    
-    console.log('🔍 BACKGROUND REFRESH - Stored current state:', currentState);
-    
-    try {
-      // Extract base table ID if this is a column
-      const baseTableId = itemId.includes('#') ? itemId.split('#')[0] : itemId;
-      const [projectId, datasetId, tableId] = baseTableId.split('.');
-      
-      // Standardize the table ID format
-      const standardTableId = `${baseTableId}#table`;
-      
-      console.log('🔍 BACKGROUND REFRESH - Making API call for:', standardTableId);
-      
-      // Get fresh data
-      const response = await axios.post(`${apiUrlBase}/metadata/review/details`, {
-        client_settings: {
-          project_id: config.project_id,
-          llm_location: config.llm_location,
-          dataplex_location: config.dataplex_location,
-        },
-        table_settings: {
-          project_id: projectId,
-          dataset_id: datasetId,
-          table_id: tableId,
-        },
-        column_settings: isViewingColumn ? {
-          column_name: itemId.includes('#column.') ? itemId.split('#column.')[1] : undefined
-        } : undefined
-      });
-      
-      const details = response.data;
-      console.log('🔍 BACKGROUND REFRESH - Received fresh data');
-      
-      // Create a new cache with the updated data
-      const newCache = { ...detailsCache };
-      
-      // Get the current column data if needed
-      let currentColumnData: MetadataItem | null = null;
-      let currentColumnName: string | null = null;
-      
-      if (isColumnView && currentColumnIndex !== null && taggedColumns && taggedColumns.length > 0) {
-        currentColumnData = taggedColumns[currentColumnIndex];
-        if (currentColumnData) {
-          currentColumnName = currentColumnData.name.split('.').pop() || null;
-        }
+        // Ensure setIsLoadingDetails is reset since loadItemDetails(forceRefresh=true) sets it
+        setIsLoadingDetails(false);
+        setNotification(prev => prev ? { ...prev, loading: false } : null);
       }
-      
-      console.log('🔍 BACKGROUND REFRESH - Current column data:', {
-        isColumnView,
-        currentColumnIndex,
-        currentColumnName,
-        hasCurrentColumnData: Boolean(currentColumnData)
-      });
-      
-      // Update the table entry in the cache
-      newCache[standardTableId] = {
-        ...details,
-        // CRITICAL: Preserve the current column if we're viewing this table and a column
-        currentColumn: currentItemId === standardTableId && isColumnView && currentColumnData
-          ? {...currentColumnData} // Create a new object to ensure React detects the change
-          : null
-      };
-      
-      console.log('🔍 BACKGROUND REFRESH - Updated table entry in cache');
-      
-      // Cache all columns from this table
-      if (details.columns) {
-        details.columns.forEach((col: any) => {
-          const colName = col.name.split('.').pop();
-          const columnId = `${standardTableId}#column.${colName}`;
-          
-          // If the column is already in the cache, preserve critical properties
-          if (detailsCache[columnId]) {
-            const preservedProps = {
-              status: detailsCache[columnId].status,
-              currentDescription: detailsCache[columnId].currentDescription,
-              draftDescription: detailsCache[columnId].draftDescription,
-              whenAccepted: detailsCache[columnId].whenAccepted
-            };
-            
-            newCache[columnId] = {
-              ...col,
-              tableMarkedForRegeneration: details.markedForRegeneration || false,
-              ...preservedProps
-            };
           } else {
-          newCache[columnId] = {
-            ...col,
-            tableMarkedForRegeneration: details.markedForRegeneration || false
-          };
-          }
-        });
-      }
-      
-      console.log('🔍 BACKGROUND REFRESH - Cached all columns');
-      
-      // Update the cache with the new data
-      console.log('🔍 BACKGROUND REFRESH - Setting details cache');
-      setDetailsCache(newCache);
-      
-      // Update the items array while preserving the current view
-      const updatedItems = items.map(item => {
-        if (item.id === standardTableId) {
-          // Create a new item with the updated details
-          const updatedItem = {
-            ...item,
-            ...details,
-          };
-          
-          // CRITICAL: Preserve the column view state
-          if (isColumnView && currentItemId === standardTableId && currentColumnData) {
-            console.log('🔍 BACKGROUND REFRESH - Explicitly preserving column view state');
-            updatedItem.currentColumn = {...currentColumnData}; // Create a new object to ensure React detects the change
-            
-            // If the current column is in the fresh data, update its metadata
-            if (details.columns) {
-              const columnName = currentColumnData.name.split('.').pop();
-              const freshColumn = details.columns.find(col => 
-                col.name.split('.').pop() === columnName
-              );
-              
-              if (freshColumn) {
-                // Preserve critical properties
-                const preservedProps = {
-                  status: currentColumnData.status,
-                  currentDescription: currentColumnData.currentDescription,
-                  draftDescription: currentColumnData.draftDescription,
-                  whenAccepted: currentColumnData.whenAccepted
-                };
-                
-                updatedItem.currentColumn = {
-                  ...currentColumnData,
-                  ...freshColumn,
-                  ...preservedProps
-                };
-              }
-            }
-          } else if (item.currentColumn) {
-            // If we're not in column view but the item has a current column, preserve it
-            updatedItem.currentColumn = item.currentColumn;
-          }
-          
-          return updatedItem;
-        }
-        return item;
-      });
-      
-      console.log('🔍 BACKGROUND REFRESH - Prepared updated items');
-      
-      // Update items state
-      console.log('🔍 BACKGROUND REFRESH - Dispatching SET_ITEMS');
-          dispatch({
-        type: 'SET_ITEMS',
-            payload: {
-          items: updatedItems,
-          pageToken: state.pageToken,
-          totalCount: state.totalCount
-            }
-          });
-          
-      // Extract tagged columns from the fresh data
-      const freshTaggedColumns = details.columns?.filter((col: any) => 
-              col.draftDescription || col.currentDescription || 
-              (col.metadata && Object.keys(col.metadata).length > 0)
-      ) || [];
-      
-      console.log('🔍 BACKGROUND REFRESH - Extracted fresh tagged columns:', {
-        count: freshTaggedColumns.length
-      });
-      
-      // Only update tagged columns if we're viewing this table
-      if (currentItemId === standardTableId) {
-        console.log('🔍 BACKGROUND REFRESH - Updating tagged columns');
-        
-        // Update tagged columns
-        setTaggedColumns(freshTaggedColumns);
-        
-        // If we're viewing a column, find its new index
-        if (isColumnView && currentColumnIndex !== null && currentColumnName) {
-          const freshColumnIndex = freshTaggedColumns.findIndex(col => 
-            col.name.split('.').pop() === currentColumnName
-          );
-          
-          console.log('🔍 BACKGROUND REFRESH - Column index:', {
-            currentColumnIndex,
-            freshColumnIndex,
-            currentColumnName
-          });
-          
-          // Only update the index if the column still exists and index changed
-          if (freshColumnIndex !== -1 && freshColumnIndex !== currentColumnIndex) {
-            console.log('🔍 BACKGROUND REFRESH - Setting new column index:', freshColumnIndex);
-            setCurrentColumnIndex(freshColumnIndex);
-          }
-        }
-      } else {
-        console.log('🔍 BACKGROUND REFRESH - Not updating tagged columns, different table');
-      }
-      
-      console.log('🔍 BACKGROUND REFRESH COMPLETED - Final state:', {
-        currentItemId,
-        currentColumnIndex,
-        isColumnView,
-        viewMode,
-        isRefreshing
-      });
-      
-      // CRITICAL: Make sure we stay in column view if we were in column view
-      if ((isColumnView || isViewingColumn) && currentItemId === standardTableId) {
-        console.log('🔍 BACKGROUND REFRESH - Ensuring column view is preserved');
-        
-        // Force a re-render of the column view by updating the column index
-        if (currentColumnIndex !== null && currentColumnIndex >= 0) {
-          // Re-set the current column index to force React to update
-          setCurrentColumnIndex(currentColumnIndex);
-        }
-        
-        // Make sure isColumnView is still true
-        setIsColumnView(true);
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('🔍 BACKGROUND REFRESH - Error:', error);
-      throw error;
+      console.warn('🔍 REFRESH - Called in unexpected state', { viewMode, currentItemId });
     }
   };
 
   const handleViewDetails = async (itemId: string) => {
-    // Find the index of the item
-    const itemIndex = items.findIndex(item => item.id === itemId);
+    const itemIndex = items.findIndex((item) => item.id === itemId);
     if (itemIndex !== -1) {
-      setCurrentItemId(itemId);
       dispatch({ type: 'SET_CURRENT_INDEX', payload: itemIndex });
       dispatch({ type: 'SET_VIEW_MODE', payload: 'review' });
       
       try {
-        // Check if we have cached data
-        if (detailsCache[itemId]) {
-          console.log('Using cached item details:', detailsCache[itemId]);
-          const cachedDetails = detailsCache[itemId];
-          
-          // Initialize column navigation state for tables
-          if (!itemId.includes('#column.') && cachedDetails.columns) {
-            const columnsWithMetadata = cachedDetails.columns.filter((col: any) => 
-              col.draftDescription || col.currentDescription || 
-              (col.metadata && Object.keys(col.metadata).length > 0)
-            );
-            setTaggedColumns(columnsWithMetadata);
-            setCurrentColumnIndex(-1);
-          }
-          
-          // Ensure we're showing table details, not column
-          dispatch({
-            type: 'UPDATE_ITEM',
-            payload: {
-              id: itemId,
-              updates: {
-                ...cachedDetails,
-                currentColumn: null // Ensure no column is selected
-              }
-            }
-          });
-        } else {
-          // Load and cache the current item's details
-          console.log('Loading item details for:', itemId);
-          const details = await loadItemDetails(itemId);
-          
-          // Initialize column navigation state for tables when loading fresh data
-          if (!itemId.includes('#column.') && details?.columns) {
-            const columnsWithMetadata = details.columns.filter((col: any) => 
-              col.draftDescription || col.currentDescription || 
-              (col.metadata && Object.keys(col.metadata).length > 0)
-            );
-            setTaggedColumns(columnsWithMetadata);
-            setCurrentColumnIndex(-1);
-          }
-        }
-        
-        // Always try to preload the next item if it exists and isn't cached
-        if (itemIndex < items.length - 1) {
-          const nextItem = items[itemIndex + 1];
-          if (!detailsCache[nextItem.id]) {
-            console.log('Preloading next item:', nextItem.id);
-            await preloadNextItem(itemIndex);
-          }
-        }
+        setIsLoadingDetails(true); // Set loading before await
+        await loadItemDetails(itemId); // forceRefresh is false by default
+        preloadNextItem(itemIndex);
       } catch (error) {
-        console.error('Error loading item details:', error);
-        setError('Failed to load item details');
+        console.error('Error in handleViewDetails:', error);
+        // setError should be handled within loadItemDetails
+      } finally {
+        setIsLoadingDetails(false); // Ensure loading is unset
       }
     }
   };
@@ -890,11 +518,15 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     if (itemIndex !== -1) {
       dispatch({ type: 'SET_CURRENT_INDEX', payload: itemIndex });
       dispatch({ type: 'SET_VIEW_MODE', payload: 'review' });
-      await loadItemDetails(item.id);
-      
-      // Preload the next item if there is one
-      if (itemIndex < items.length - 1) {
+      try {
+        setIsLoadingDetails(true); // Set loading before await
+        await loadItemDetails(item.id); // forceRefresh is false by default
         preloadNextItem(itemIndex);
+      } catch (error) {
+        console.error('Error loading details in handleEdit:', error);
+        // setError should be handled within loadItemDetails
+      } finally {
+        setIsLoadingDetails(false); // Ensure loading is unset
       }
     }
   };
@@ -976,15 +608,51 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   };
 
   const handleAddComment = async (itemId: string) => {
+    console.log(`handleAddComment triggered for itemId: ${itemId}`);
+    if (!newComment.trim()) return; // Prevent empty comments
+
     try {
       setError(null);
-      const item = items.find(i => i.id === itemId);
-      if (!item) return;
+      const isColumn = itemId.includes('#column.');
+      let tableFqn: string;
+      let projectId: string, datasetId: string, tableIdBase: string;
+      let columnName: string | undefined;
+      let itemToUpdateInState: MetadataItem | undefined;
+      let stateUpdateId: string = itemId; // ID to use for dispatching UPDATE_ITEM
 
-      const tableFqn = item.id.split('#')[0];
-      const [projectId, datasetId, tableId] = tableFqn.split('.');
-      const isColumn = item.id.includes('#column.');
-      const columnName = isColumn ? item.id.split('#column.')[1] : undefined;
+      if (isColumn) {
+        console.log('Handling comment for COLUMN');
+        const parts = itemId.split('#column.');
+        const tablePart = parts[0]; // e.g., project.dataset.table#table
+        columnName = parts[1];
+        tableFqn = tablePart.replace('#table', ''); // Get FQN: project.dataset.table
+        [projectId, datasetId, tableIdBase] = tableFqn.split('.');
+        
+        // Find the parent table item in state to update its currentColumn if necessary
+        itemToUpdateInState = items.find(i => i.id === tablePart);
+        if (itemToUpdateInState) {
+          stateUpdateId = tablePart; // Update the parent table item in state
+          console.log(`Found parent table item in state: ${stateUpdateId}`);
+        } else {
+           console.warn(`Parent table item ${tablePart} not found in state items for column comment.`);
+           // Proceed with API call, but state update might be incomplete
+        }
+
+      } else {
+        console.log('Handling comment for TABLE');
+        // It's a table, find the item directly in the state array
+        itemToUpdateInState = items.find(i => i.id === itemId);
+        if (!itemToUpdateInState) {
+          console.error(`handleAddComment: Table Item with ID ${itemId} not found in state.items. Aborting API call.`);
+          setError(`Failed to add comment: Could not find item ${itemId} in the current list.`);
+          return;
+        }
+        tableFqn = itemToUpdateInState.id.replace('#table', '');
+        [projectId, datasetId, tableIdBase] = tableFqn.split('.');
+        columnName = undefined;
+      }
+
+      console.log('handleAddComment: Making API call with:', { projectId, datasetId, tableIdBase, columnName });
 
       await axios.post(`${apiUrlBase}/metadata/review/add_comment`, {
         client_settings: {
@@ -995,42 +663,98 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
         table_settings: {
           project_id: projectId,
           dataset_id: datasetId,
-          table_id: tableId,
+          table_id: tableIdBase, // Use base table ID for API
         },
         column_settings: isColumn ? {
           column_name: columnName
         } : undefined,
         comment: newComment,
-        column_name: columnName,
+        column_name: columnName, // API expects this redundant field
         is_column_comment: isColumn
       });
 
-      // Update the comments in the state
-      const updatedItem = {
-        ...item,
-        comments: [...(item.comments || []), newComment]
-      };
+      console.log('handleAddComment: API call successful.');
 
-      dispatch({
-        type: 'UPDATE_ITEM',
-        payload: { 
-          id: itemId, 
-          updates: updatedItem
+      // --- State and Cache Update --- 
+      const newCommentText = newComment; // Store before clearing
+      setNewComment(''); // Clear input field immediately
+
+      // 1. Update Cache
+      setDetailsCache(prev => {
+        const newCache = { ...prev };
+        const targetCacheId = itemId; // Use the full ID (table or column)
+        
+        if (newCache[targetCacheId]) {
+          console.log(`Updating comments in cache for ${targetCacheId}`);
+          newCache[targetCacheId] = {
+            ...newCache[targetCacheId],
+            comments: [...(newCache[targetCacheId].comments || []), newCommentText]
+          };
+        } else {
+          console.warn(`Cache entry not found for ${targetCacheId} during comment update.`);
+          // Optionally initialize cache entry if needed, though it should exist if viewable
+          // newCache[targetCacheId] = { comments: [newCommentText] }; 
         }
+
+        // If it was a column comment, also update the comments array within the cached *table* details
+        // This might be redundant if the column details are always fetched fresh, but safer to keep consistent
+        if (isColumn && itemToUpdateInState) { // itemToUpdateInState here refers to the parent table
+           const parentTableId = itemToUpdateInState.id;
+           if (newCache[parentTableId] && newCache[parentTableId].columns) {
+             console.log(`Updating comments within parent table cache ${parentTableId} for column ${columnName}`);
+             newCache[parentTableId] = {
+               ...newCache[parentTableId],
+               columns: newCache[parentTableId].columns.map((col: any) => {
+                 if (col.name.endsWith(`.${columnName}`)) {
+                   return {
+                     ...col,
+                     comments: [...(col.comments || []), newCommentText]
+                   };
+                 }
+                 return col;
+               })
+             };
+           }
+        }
+        return newCache;
       });
 
-      // Update the cache
-      if (isColumn) {
-        setDetailsCache(prev => ({
-          ...prev,
-          [itemId]: {
-            ...prev[itemId],
-            comments: updatedItem.comments
-          }
-        }));
-      }
+      // 2. Update State (via dispatch)
+      if (itemToUpdateInState) {
+          console.log(`Updating item in state: ${stateUpdateId}`);
+          let updates: Partial<MetadataItem>;
 
-      setNewComment('');
+      if (isColumn) {
+            // Update the currentColumn within the parent table item state
+            if (itemToUpdateInState.currentColumn && itemToUpdateInState.currentColumn.id === itemId) {
+               updates = {
+                 currentColumn: {
+                   ...itemToUpdateInState.currentColumn,
+                   comments: [...(itemToUpdateInState.currentColumn.comments || []), newCommentText]
+                 }
+               };
+            } else {
+               console.warn('State update: Current column in state does not match commented column. Skipping state update for currentColumn.');
+               return; // Don't dispatch if state seems inconsistent
+            }
+          } else {
+            // Update the comments directly on the table item state
+            updates = {
+              comments: [...(itemToUpdateInState.comments || []), newCommentText]
+            };
+          }
+          
+          dispatch({
+            type: 'UPDATE_ITEM',
+            payload: { 
+              id: stateUpdateId, // Use table ID if it was a column comment
+              updates
+            }
+          });
+          console.log('handleAddComment: State dispatch complete.');
+      } else {
+           console.warn('handleAddComment: itemToUpdateInState was not found, cannot dispatch state update.');
+      }
 
     } catch (error: any) {
       console.error('Error adding comment:', error);
@@ -1265,111 +989,46 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentItemIndex < items.length - 1) {
-      const nextItem = items[currentItemIndex + 1];
-      
-      // If moving to a table, load its columns
-      if (nextItem.type === 'table') {
-        setCurrentItemId(nextItem.id);
-        // Let loadItemDetails handle setting up the column state
-      } else {
-        // If moving to a column, ensure it belongs to the current table
-        const tableId = nextItem.id.split('#')[0];
-        if (tableId !== currentItemId) {
-          // Moving to a column of a different table
-          setCurrentItemId(tableId);
-        }
+      const nextIndex = currentItemIndex + 1;
+      const nextItem = items[nextIndex];
+
+      dispatch({ type: 'SET_CURRENT_INDEX', payload: nextIndex });
+      // Ensure currentItemId reflects the table context, not potentially a column from the previous item
+      setCurrentItemId(nextItem.id.split('#')[0] + '#table');
+
+      try {
+        setIsLoadingDetails(true); // Use the main details loader
+        await loadItemDetails(nextItem.id); // forceRefresh is false by default
+        preloadNextItem(nextIndex);
+      } catch (error) {
+        console.error('Error in handleNext:', error);
+        // setError handled in loadItemDetails
+      } finally {
+        setIsLoadingDetails(false);
       }
-      
-      dispatch({ type: 'SET_CURRENT_INDEX', payload: currentItemIndex + 1 });
-      loadItemDetails(nextItem.id);
     }
   };
 
-  const handlePrevious = () => {
+  const handlePrevious = async () => {
     if (currentItemIndex > 0) {
-      const prevItem = items[currentItemIndex - 1];
-      
-      // If moving to a table, load its columns
-      if (prevItem.type === 'table') {
-        setCurrentItemId(prevItem.id);
-        // Let loadItemDetails handle setting up the column state
-      } else {
-        // If moving to a column, ensure it belongs to the current table
-        const tableId = prevItem.id.split('#')[0];
-        if (tableId !== currentItemId) {
-          // Moving to a column of a different table
-          setCurrentItemId(tableId);
-        }
-      }
-      
-      dispatch({ type: 'SET_CURRENT_INDEX', payload: currentItemIndex - 1 });
-      
-      // Only load details if not already in cache
-      if (!detailsCache[prevItem.id]) {
-        console.log('Loading details for previous item:', prevItem.id);
-      loadItemDetails(prevItem.id);
-      } else {
-        console.log('Using cached data for previous item:', prevItem.id);
-        const cachedDetails = detailsCache[prevItem.id];
-        
-        // For columns, handle column-specific logic
-        if (prevItem.id.includes('#column.')) {
-          const columnDetails = {
-            ...cachedDetails,
-            id: prevItem.id,
-            type: 'column',
-            comments: cachedDetails.comments || [],
-            currentDescription: cachedDetails.currentDescription || '',
-            draftDescription: cachedDetails.draftDescription || '',
-            status: cachedDetails.status || 'draft'
-          };
-          
-          dispatch({
-            type: 'UPDATE_ITEM',
-            payload: {
-              id: prevItem.id,
-              updates: columnDetails
-            }
-          });
-          
-          // Update column navigation state
-          const tableId = prevItem.id.split('#')[0];
-          if (detailsCache[tableId]?.columns) {
-            const columnsWithMetadata = detailsCache[tableId].columns.filter((col: any) => 
-              col.draftDescription || col.currentDescription || 
-              (col.metadata && Object.keys(col.metadata).length > 0)
-            );
-            setTaggedColumns(columnsWithMetadata);
-            const columnName = prevItem.id.split('#column.')[1];
-            const columnIndex = columnsWithMetadata.findIndex(col => col.name.endsWith(columnName));
-            if (columnIndex !== -1) {
-              setCurrentColumnIndex(columnIndex);
-            }
-          }
-        } else {
-          // For tables, update table details and column navigation state
-          const updatedDetails = { ...cachedDetails, currentColumn: null };
-          
-          dispatch({
-            type: 'UPDATE_ITEM',
-            payload: {
-              id: prevItem.id,
-              updates: updatedDetails
-            }
-          });
-          
-          // Update column navigation state for tables
-          if (cachedDetails.columns) {
-            const columnsWithMetadata = cachedDetails.columns.filter((col: any) => 
-              col.draftDescription || col.currentDescription || 
-              (col.metadata && Object.keys(col.metadata).length > 0)
-            );
-            setTaggedColumns(columnsWithMetadata);
-            setCurrentColumnIndex(-1);
-          }
-        }
+      const prevIndex = currentItemIndex - 1;
+      const prevItem = items[prevIndex];
+
+      dispatch({ type: 'SET_CURRENT_INDEX', payload: prevIndex });
+       // Ensure currentItemId reflects the table context
+      setCurrentItemId(prevItem.id.split('#')[0] + '#table');
+
+      try {
+        setIsLoadingDetails(true); // Use the main details loader
+        await loadItemDetails(prevItem.id); // forceRefresh is false by default
+        preloadNextItem(prevIndex);
+      } catch (error) {
+        console.error('Error in handlePrevious:', error);
+        // setError handled in loadItemDetails
+      } finally {
+        setIsLoadingDetails(false);
       }
     }
   };
@@ -2081,8 +1740,11 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   };
 
   const loadItemDetails = async (itemId: string, forceRefresh = false) => {
-    try {
+    // Only set loading state if forceRefresh is true (i.e., not a preload)
+    if (forceRefresh) {
         setIsLoadingDetails(true);
+    }
+    try {
       setError(null);
 
       // Store current view state before making any changes
@@ -2298,7 +1960,8 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       setError(errorMessage);
       return null;
     } finally {
-        setIsLoadingDetails(false);
+      // Loading state is now handled by the caller when forceRefresh is true
+      // if (forceRefresh) { setIsLoadingDetails(false); }
       
       // Restore column view state if needed
       if (isColumnView && currentColumnIndex >= 0 && itemId.includes('#column.')) {
@@ -2318,28 +1981,18 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       try {
         // Only preload if not already in cache
         if (!detailsCache[nextItem.id]) {
-          await loadItemDetails(nextItem.id, false);
+          await loadItemDetails(nextItem.id, false); // Use forceRefresh = false
           console.log('Successfully preloaded next item:', nextItem.id);
         } else {
           console.log('Next item already in cache:', nextItem.id);
         }
         
-        // Also preload the item after that (look ahead by 2)
-        if (nextItemIndex < items.length - 1) {
-          const nextNextItemIndex = nextItemIndex + 1;
-          const nextNextItem = items[nextNextItemIndex];
-          console.log('Preloading next+1 item:', nextNextItem.id, 'at index:', nextNextItemIndex);
-          
-          // Only preload if not already in cache
-          if (!detailsCache[nextNextItem.id]) {
-            await loadItemDetails(nextNextItem.id, false);
-            console.log('Successfully preloaded next+1 item:', nextNextItem.id);
-          } else {
-            console.log('Next+1 item already in cache:', nextNextItem.id);
-          }
-        }
+        // REMOVED: Lookahead by 2 preloading logic
+        // if (nextItemIndex < items.length - 1) { ... }
+
       } catch (error) {
-        console.error('Error preloading next item(s):', error);
+        console.error('Error preloading next item:', nextItem.id, error);
+        // Don't bubble up error, preloading failure shouldn't block UI
       }
     }
   };
@@ -2705,7 +2358,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     setIsRichText(toRichText);
   };
 
-  const fetchReviewItems = async (nextPageToken?: string) => {
+  const fetchReviewItems = async (nextPageToken?: string): Promise<boolean> => { // Return boolean indicating success
     try {
       setError(null);
       setIsLoading(true);
@@ -2723,6 +2376,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           documentation_csv_uri: "",
           strategy: "NAIVE"
         }
+        // Add page_token logic here if/when pagination is implemented
       });
 
       console.log('Received response:', response.data);
@@ -2741,13 +2395,14 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
         }
       });
 
-      // If in review mode and we have items, load the first item's details
-      if (viewMode === 'review' && newItems.length > 0) {
-        await loadItemDetails(newItems[0].id);
-        if (newItems.length > 1) {
-          preloadNextItem(0);
-        }
-      }
+      // REMOVED: Logic to load/preload details directly from here
+      // if (viewMode === 'review' && newItems.length > 0) {
+      //   await loadItemDetails(newItems[0].id);
+      //   if (newItems.length > 1) {
+      //     preloadNextItem(0);
+      //   }
+      // }
+      return true; // Indicate success
 
     } catch (error: any) {
       console.error('Error fetching review items:', error);
@@ -2761,8 +2416,10 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           totalCount: 0
         }
       });
+      return false; // Indicate failure
     } finally {
-      setIsLoading(false);
+      // Setting isLoading false is handled by the calling useEffect
+      // setIsLoading(false);
     }
   };
 

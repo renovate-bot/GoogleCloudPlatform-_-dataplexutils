@@ -493,6 +493,11 @@ def get_regeneration_counts(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="dataset_project_id is required"
             )
+        if not dataset_settings.dataset_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="dataset_id is required for getting regeneration counts"
+            )
             
         client = Client(
             project_id=client_settings.project_id,

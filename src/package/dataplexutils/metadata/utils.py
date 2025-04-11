@@ -56,9 +56,9 @@ class MetadataUtils:
         """
         try:
             pattern = r"^([^.]+)[\.:]([^.]+)\.([^.]+)"
-            logger.debug(f"Splitting table FQN: {table_fqn}.")
+            #logger.debug(f"Splitting table FQN: {table_fqn}.")
             match = re.search(pattern, table_fqn)
-            logger.debug(f"Found 3 groups: {match.group(1)} {match.group(2)} {match.group(3)}")
+            #logger.debug(f"Found 3 groups: {match.group(1)} {match.group(2)} {match.group(3)}")
             return match.group(1), match.group(2), match.group(3)
         except Exception as e:
             logger.error(f"Exception: {e}.")
