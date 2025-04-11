@@ -272,7 +272,9 @@ class ReviewOperations:
                 'user_who_certified': '',
                 'generation_date': datetime.datetime.now().isoformat(),
                 'to_be_regenerated': False,
-                'external_document_uri': ''
+                'external_document_uri': '',
+                'is-accepted': False,
+                'when-accepted': None
             }
 
             # Get table-level aspect data
@@ -291,7 +293,9 @@ class ReviewOperations:
                             'user_who_certified': aspect_data.get('user-who-certified', ''),
                             'generation_date': aspect_data.get('generation-date', datetime.datetime.now().isoformat()),
                             'to_be_regenerated': aspect_data.get('to-be-regenerated', False),
-                            'external_document_uri': aspect_data.get('external-document-uri', '')
+                            'external_document_uri': aspect_data.get('external-document-uri', ''),
+                            'is-accepted': aspect_data.get('is-accepted', False),
+                            'when-accepted': aspect_data.get('when-accepted')
                         })
                         if aspect_data.get('tags'):
                             tags.update(aspect_data['tags'])
@@ -361,7 +365,9 @@ class ReviewOperations:
                 'user_who_certified': '',
                 'generation_date': datetime.datetime.now().isoformat(),
                 'to_be_regenerated': False,
-                'external_document_uri': ''
+                'external_document_uri': '',
+                'is-accepted': False,
+                'when-accepted': None
             }
             column_tags = dict(parent_tags)
             comments = []
@@ -381,13 +387,39 @@ class ReviewOperations:
                             draft_description = aspect_data["contents"]
                             
                         # Extract metadata
-                        metadata.update({
+                        metadata_updates = {
                             'certified': aspect_data.get('certified', False),
                             'user_who_certified': aspect_data.get('user-who-certified', ''),
                             'generation_date': aspect_data.get('generation-date', datetime.datetime.now().isoformat()),
                             'to_be_regenerated': aspect_data.get('to-be-regenerated', False),
                             'external_document_uri': aspect_data.get('external-document-uri', '')
-                        })
+                        }
+                        
+                        # --- Explicitly check and add acceptance status --- START
+                        raw_is_accepted = None
+                        raw_when_accepted = None
+                        if 'is-accepted' in aspect_data:
+                            raw_is_accepted = aspect_data['is-accepted']
+                            # Handle boolean true or string 'true'
+                            is_accepted_val = raw_is_accepted is True or str(raw_is_accepted).lower() == 'true'
+                            metadata_updates['is-accepted'] = is_accepted_val
+                            logger.debug(f"Column {column.name} - Found 'is-accepted' in aspect data: {raw_is_accepted} -> {is_accepted_val}")
+                        else:
+                             logger.debug(f"Column {column.name} - Key 'is-accepted' not found in aspect data.")
+                             metadata_updates['is-accepted'] = False # Default if key missing
+                             
+                        if 'when-accepted' in aspect_data:
+                             raw_when_accepted = aspect_data['when-accepted']
+                             metadata_updates['when-accepted'] = raw_when_accepted
+                             logger.debug(f"Column {column.name} - Found 'when-accepted' in aspect data: {raw_when_accepted}")
+                        else:
+                             logger.debug(f"Column {column.name} - Key 'when-accepted' not found in aspect data.")
+                             metadata_updates['when-accepted'] = None # Default if key missing
+                        # --- Explicitly check and add acceptance status --- END
+                        
+                        logger.debug(f"Column {column.name} - Metadata updates to apply: {metadata_updates}")
+                        metadata.update(metadata_updates)
+                        logger.debug(f"Column {column.name} - Metadata dict after update: {metadata}")
                         
                         # Extract comments
                         if aspect_data.get('human-comments'):
@@ -414,6 +446,7 @@ class ReviewOperations:
                 "metadata": metadata,
                 "tags": column_tags
             }
+            logger.debug(f"Returning column details for {column.name}: {result}") # Log final result
             return result
             
         except Exception as e:

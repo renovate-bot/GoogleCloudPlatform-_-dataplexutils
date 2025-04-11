@@ -83,11 +83,22 @@ const reviewReducer = (state: ReviewState, action: ReviewAction): ReviewState =>
     case 'UPDATE_ITEM':
       return {
         ...state,
-        items: state.items.map(item =>
-          item.id === action.payload.id
-            ? { ...item, ...action.payload.updates }
-            : item
-        ),
+        items: state.items.map(item => {
+          if (item.id === action.payload.id) {
+            const updates = action.payload.updates;
+            return {
+              ...item,
+              ...updates,
+              metadata: updates.metadata 
+                ? { ...item.metadata, ...updates.metadata } 
+                : item.metadata,
+              currentColumn: updates.currentColumn !== undefined 
+                ? updates.currentColumn 
+                : item.currentColumn,
+            };
+          }
+          return item;
+        }),
       };
     case 'SET_CURRENT_INDEX':
       return {

@@ -438,9 +438,14 @@ def accept_column_draft_description(
         )
 
         table_fqn = f"{table_settings.project_id}.{table_settings.dataset_id}.{table_settings.table_id}"
-        logger.info(f"Accepting draft description for column {column_settings.column_name} in table: {table_fqn}")
-        client.accept_column_draft_description(table_fqn, column_settings.column_name)
-        return {"message": f"Column {column_settings.column_name} draft description accepted successfully"}
+        column_name = column_settings.column_name
+        logger.info(f"Accepting draft description for column {column_name} in table: {table_fqn}")
+        
+        # Promote the draft description to the actual description (Original essential logic)
+        client.accept_column_draft_description(table_fqn, column_name)
+        logger.info(f"Promoted draft description for column {column_name}")
+        
+        return {"message": f"Column {column_name} draft description accepted successfully"}
     except Exception as e:
         logger.exception("An error occurred while accepting column draft description") 
         raise HTTPException(
@@ -700,6 +705,39 @@ def get_review_items(
             result = client._review_ops.get_review_items_for_dataset(dataset_fqn=dataset_settings.dataset_id)
             logger.info(f"Raw result from review_ops: {result}")
             
+            # --- Start of added filtering logic ---
+            # Ensure result is a dictionary and has 'items'
+            raw_items = []
+            if isinstance(result, dict):
+                if "data" in result and isinstance(result["data"], dict):
+                     # Handle potential extra 'data' wrapper
+                     raw_items = result["data"].get("items", [])
+                else:
+                     raw_items = result.get("items", [])
+            
+            if not isinstance(raw_items, list):
+                logger.warning(f"Unexpected format for items in review result: {type(raw_items)}")
+                raw_items = []
+
+            # Filter out items that have been accepted
+            filtered_items = []
+            for item in raw_items:
+                if isinstance(item, dict):
+                    # Check the 'metadata' field within the item for 'is-accepted'
+                    # Adjust path based on actual structure if needed
+                    review_metadata = item.get("metadata", {})
+                    if isinstance(review_metadata, dict) and review_metadata.get("is-accepted") is True:
+                        logger.info(f"Filtering out accepted item: {item.get('id', 'N/A')}")
+                        continue # Skip this item
+                    filtered_items.append(item)
+                else:
+                    logger.warning(f"Skipping non-dict item in review list: {item}")
+
+            total_count_before_filter = len(raw_items)
+            total_count_after_filter = len(filtered_items)
+            logger.info(f"Filtered review items: {total_count_before_filter} -> {total_count_after_filter}")
+            # --- End of added filtering logic ---
+
             # Ensure we always return a properly structured response
             if not isinstance(result, dict):
                 result = {"items": [], "nextPageToken": None, "totalCount": 0}
@@ -708,11 +746,11 @@ def get_review_items(
             if isinstance(result, dict) and "data" in result:
                 result = result["data"]
             
-            # Ensure all required fields are present
+            # Ensure all required fields are present using the *filtered* items
             response_data = {
-                "items": result.get("items", []),
-                "nextPageToken": result.get("nextPageToken", None),
-                "totalCount": result.get("totalCount", len(result.get("items", [])))
+                "items": filtered_items, # Use filtered list
+                "nextPageToken": result.get("nextPageToken", None), # Keep original token
+                "totalCount": total_count_after_filter # Use count after filtering
             }
             
             logger.info(f"Structured response data: {response_data}")
@@ -887,6 +925,10 @@ def get_review_item_details(
             
         if not details:
             raise ValueError(f"No details found for {'column ' + column_name if column_name else 'table'} {table_fqn}")
+        
+        # --- Add logging before returning --- START
+        logger.info(f"Returning details to frontend: {details}")
+        # --- Add logging before returning --- END
         
         # Return the details directly without wrapping in data field
         return details

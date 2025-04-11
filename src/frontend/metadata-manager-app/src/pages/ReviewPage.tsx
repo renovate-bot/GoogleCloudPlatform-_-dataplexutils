@@ -46,7 +46,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import { DatplexConfig } from '../App';
 import { useCache } from '../contexts/CacheContext';
-import { useReview, MetadataItem } from '../contexts/ReviewContext';
+import { useReview, MetadataItem as ReviewContextMetadataItem } from '../contexts/ReviewContext';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 
@@ -70,6 +70,15 @@ interface ReviewPageProps {
     description_handling?: string;
     description_prefix?: string;
   };
+}
+
+// Extend the MetadataItem interface
+interface MetadataItem extends ReviewContextMetadataItem {
+  isAccepted?: boolean; // Added optional field
+  whenAccepted?: string; // Added optional field
+  isMarkingForRegeneration?: boolean; // Keep this
+  currentColumn?: MetadataItem | null; // Ensure recursive type is correct
+  metadata?: { [key: string]: any }; // Add metadata explicitly if not present in base type
 }
 
 const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
@@ -1389,6 +1398,21 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     });
     console.groupEnd();
     
+    // --- Determine effective item and acceptance status for Action Bar --- START
+    const effectiveItem: MetadataItem = (currentItem.currentColumn as MetadataItem) ?? currentItem;
+    const isEffectivelyAccepted = effectiveItem.isAccepted;
+    const interactiveItemId = effectiveItem.id; 
+    // --- Determine effective item and acceptance status for Action Bar --- END
+    
+    // --- Add logging for Accept button state --- START
+    console.log('[renderActionBar] Accept Button State Debug:', {
+         effectiveItemId: effectiveItem.id,
+         isEffectivelyAccepted: isEffectivelyAccepted, // Should be true if accepted
+         hasDraft: Boolean(effectiveItem.draftDescription), // Should ideally be irrelevant if accepted
+         isAcceptingNow: isAccepting[interactiveItemId] // Should be false unless clicked
+    });
+    // --- Add logging for Accept button state --- END
+
     return (
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         {/* Left side - Edit and Accept buttons */}
@@ -1396,7 +1420,7 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           <Button
             variant="contained"
             color="primary"
-            onClick={() => handleEditInReview(currentItem)}
+            onClick={() => handleEditInReview(effectiveItem)} // Pass the effective item
             startIcon={<EditIcon />}
           >
             Edit
@@ -1404,11 +1428,11 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           <Button
             variant="contained"
             color="success"
-            onClick={() => handleAccept(currentItem)}
+            onClick={() => handleAccept(effectiveItem)} // Pass the effective item
             startIcon={<CheckCircleIcon />}
-            disabled={!currentItem.draftDescription || isAccepting[currentItem.id]}
+            disabled={!effectiveItem.draftDescription || isAccepting[interactiveItemId] || isEffectivelyAccepted} // Use effective status
           >
-            {isAccepting[currentItem.id] ? 'Accepting...' : 'Accept'}
+            {isAccepting[interactiveItemId] ? 'Accepting...' : (isEffectivelyAccepted ? 'Accepted' : 'Accept')} 
           </Button>
           <Button
             variant="outlined"
@@ -1739,102 +1763,59 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     }
   };
 
-  const loadItemDetails = async (itemId: string, forceRefresh = false) => {
-    // Only set loading state if forceRefresh is true (i.e., not a preload)
-    if (forceRefresh) {
+  const loadItemDetails = async (itemId: string, forceRefresh = false): Promise<MetadataItem | null> => {
+    // Determine if loading a column or table
+    const isColumn = itemId.includes('#column.');
+    const currentTableId = isColumn ? itemId.split('#column.')[0] : itemId; // Get the base table ID
+
+    // Use details loader only for explicit refresh or initial load, not preloads/cache hits
+    const showLoader = forceRefresh || !detailsCache[itemId]; 
+    if (showLoader) {
         setIsLoadingDetails(true);
     }
+
     try {
       setError(null);
+      console.log('[loadItemDetails] Starting for:', itemId, 'Force refresh:', forceRefresh);
 
-      // Store current view state before making any changes
-      const wasInColumnView = isColumnView;
-      const previousColumnIndex = currentColumnIndex;
-      const previousItemId = currentItemId;
-      
-      console.log('loadItemDetails - Starting with state:', {
-        itemId,
-        forceRefresh,
-        wasInColumnView,
-        previousColumnIndex,
-        previousItemId
-      });
-
-      // Use cache if available and not forcing refresh
+      // --- Cache Check ---
       if (!forceRefresh && detailsCache[itemId]) {
-        console.log('Using cached item details:', itemId);
+        console.log('[loadItemDetails] Using cached details for:', itemId);
         const cachedDetails = detailsCache[itemId];
-
-        if (itemId.includes('#column.')) {
-          const columnName = itemId.split('#column.')[1];
-          const itemDetails = cachedDetails.columns?.find((col: any) => col.name.endsWith(columnName));
-          if (!itemDetails) {
-            throw new Error(`Column ${columnName} not found in table details`);
-          }
-          // When viewing a column, we should still maintain the tagged columns list
-          if (cachedDetails.columns) {
-            const columnsWithMetadata = cachedDetails.columns.filter((col: any) => 
-              col.draftDescription || col.currentDescription || 
-              (col.metadata && Object.keys(col.metadata).length > 0)
-            );
-            console.log('Found columns with metadata:', columnsWithMetadata.length);
-            setTaggedColumns(columnsWithMetadata);
-            // Set the current column index based on the loaded column
-            const columnIndex = columnsWithMetadata.findIndex(col => col.name.endsWith(columnName));
-            if (columnIndex !== -1) {
-              setCurrentColumnIndex(columnIndex);
+        
+        // Directly use cached column details if available
+        if (isColumn) {
+            dispatch({ 
+                type: 'UPDATE_ITEM', 
+                payload: { 
+                    id: currentTableId, // Update the parent table...
+                    updates: { currentColumn: cachedDetails } // ...with the cached column details
+                } 
+            });
+             // Also ensure the standalone column entry in state is up-to-date if needed elsewhere
+            dispatch({ type: 'UPDATE_ITEM', payload: { id: itemId, updates: cachedDetails } });
+            return cachedDetails;
+        } else {
+            // Use cached table details
+            dispatch({ type: 'UPDATE_ITEM', payload: { id: itemId, updates: { ...cachedDetails, currentColumn: null } } }); // Ensure currentColumn is null
+             // Update local component state related to columns based on cache
+            if (cachedDetails.columns) {
+                const columnsWithMetadata = cachedDetails.columns.filter((col: any) =>
+                  col.draftDescription || col.currentDescription || (col.metadata && Object.keys(col.metadata).length > 0)
+                );
+                setTaggedColumns(columnsWithMetadata);
             }
-          }
-          
-          // Ensure regeneration status is properly set for columns
-          const updatedDetails = {
-                ...itemDetails,
-                markedForRegeneration: itemDetails.markedForRegeneration || false,
-                isMarkingForRegeneration: itemDetails.isMarkingForRegeneration || false,
-            // Ensure we're not inheriting the table's regeneration status
-                tableMarkedForRegeneration: cachedDetails.markedForRegeneration || false
-          };
-          
-          dispatch({
-            type: 'UPDATE_ITEM',
-            payload: {
-              id: itemId,
-              updates: updatedDetails
-            }
-          });
-          
-          return updatedDetails;
+            setCurrentColumnIndex(-1); // Reset column index when loading table
+            setCurrentItemId(itemId); // Set current item ID to the table ID
+            return cachedDetails;
         }
-
-        // For table details: reinitialize column navigation state and clear any active column
-        if (cachedDetails.columns) {
-          const columnsWithMetadata = cachedDetails.columns.filter((col: any) => 
-            col.draftDescription || col.currentDescription || 
-            (col.metadata && Object.keys(col.metadata).length > 0)
-          );
-          setTaggedColumns(columnsWithMetadata);
-          setCurrentColumnIndex(-1);
-          setCurrentItemId(itemId);
-        }
-
-        // Clear any active column for table details
-        const updatedDetails = { ...cachedDetails, currentColumn: null };
-        dispatch({
-          type: 'UPDATE_ITEM',
-          payload: {
-            id: itemId,
-            updates: updatedDetails
-          }
-        });
-        // Also update the cache with the cleared currentColumn
-        setDetailsCache(prev => ({ ...prev, [itemId]: updatedDetails }));
-        return updatedDetails;
       }
 
-      const [projectId, datasetId, tableId] = itemId.split('#')[0].split('.');
-      const isColumn = itemId.includes('#column.');
+      // --- API Fetch ---
+      console.log('[loadItemDetails] Fetching details from API for:', itemId);
+      const [projectId, datasetId, tableIdBase] = currentTableId.replace('#table', '').split('.');
+      const columnName = isColumn ? itemId.split('#column.')[1] : undefined;
 
-      console.log('Fetching details for item:', itemId);
       const response = await axios.post(`${apiUrlBase}/metadata/review/details`, {
         client_settings: {
           project_id: config.project_id,
@@ -1844,132 +1825,191 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
         table_settings: {
           project_id: projectId,
           dataset_id: datasetId,
-          table_id: tableId,
+          table_id: tableIdBase, // Use base ID for API
         },
-        column_settings: isColumn ? {
-          column_name: itemId.split('#column.')[1]
-        } : undefined
+        // API fetches table details even when asking for a column, we extract later
       });
 
-      const details = response.data;
-      console.log('Received item details:', details);
+      const details = response.data; // This is always the full table details from API
+      console.log('[loadItemDetails] Received raw details from API:', details);
 
-      // If this is a column request, find the column details in the table response
-      let itemDetails;
+      let finalItemDetails: MetadataItem | null = null;
+      let stateUpdateId = itemId; // ID for dispatching state update
+
       if (isColumn) {
-        const columnName = itemId.split('#column.')[1];
-        itemDetails = details.columns?.find((col: any) => col.name.endsWith(columnName));
-        if (!itemDetails) {
-          throw new Error(`Column ${columnName} not found in table details`);
+        // --- Processing Column ---
+        const extractedColumnDetails = details.columns?.find((col: any) => col.name.endsWith(`.${columnName}`));
+        if (!extractedColumnDetails) {
+          throw new Error(`Column ${columnName} not found in API response for table ${currentTableId}`);
         }
-        // When viewing a column, we should still maintain the tagged columns list
-        if (details.columns) {
-          const columnsWithMetadata = details.columns.filter((col: any) => 
-            col.draftDescription || col.currentDescription || 
-            (col.metadata && Object.keys(col.metadata).length > 0)
-          );
-          console.log('Found columns with metadata:', columnsWithMetadata.length);
-          setTaggedColumns(columnsWithMetadata);
-          // Set the current column index based on the loaded column
-          const columnIndex = columnsWithMetadata.findIndex(col => col.name.endsWith(columnName));
-          if (columnIndex !== -1) {
-            setCurrentColumnIndex(columnIndex);
-          }
+        console.log('[loadItemDetails] Extracted raw column details:', extractedColumnDetails);
+
+        const columnMetadata = extractedColumnDetails.metadata || {};
+        const acceptedStatus = columnMetadata['is-accepted'];
+        const acceptedTimestamp = columnMetadata['when-accepted'];
+        const isItemAccepted = acceptedStatus === true || String(acceptedStatus).toLowerCase() === 'true';
+
+        finalItemDetails = {
+          // Base fields from extracted column data
+          id: itemId, // Use the full column ID
+          type: 'column',
+          name: extractedColumnDetails.name,
+          currentDescription: extractedColumnDetails.currentDescription || '',
+          draftDescription: extractedColumnDetails.draftDescription || '',
+          isHtml: extractedColumnDetails.isHtml || false,
+          comments: extractedColumnDetails.comments || [],
+          tags: extractedColumnDetails.tags || {},
+          
+          // Construct the metadata object, merging acceptance status
+          metadata: {
+            ...columnMetadata, // Include all original metadata
+            'is-accepted': isItemAccepted, // Ensure correct value type might be needed if API returns string
+            'when-accepted': acceptedTimestamp,
+          },
+
+          // Set top-level calculated fields
+          isAccepted: isItemAccepted,
+          whenAccepted: acceptedTimestamp,
+          status: isItemAccepted ? 'accepted' : (extractedColumnDetails.status || 'draft'),
+
+          // Other relevant fields
+          lastModified: extractedColumnDetails.lastModified || columnMetadata.generation_date || new Date().toISOString(),
+          markedForRegeneration: extractedColumnDetails.markedForRegeneration || columnMetadata.to_be_regenerated || false,
+          isMarkingForRegeneration: false, // Reset loading state
+          // tableMarkedForRegeneration: details.markedForRegeneration || details.metadata?.['to-be-regenerated'] || false, // Removed - Not part of item state
+          parentTableId: currentTableId // Add parent ID if needed
+        };
+
+        // Update the parent table item in state to hold this column as current
+        if (finalItemDetails) { // Add null check before dispatch
+          dispatch({ 
+              type: 'UPDATE_ITEM', 
+              payload: { 
+                  id: currentTableId, // Update the parent table item
+                  updates: { currentColumn: finalItemDetails } // Set the processed column as current
+              } 
+          });
+           // Also update the specific column item in state if it exists or is needed
+          dispatch({ type: 'UPDATE_ITEM', payload: { id: itemId, updates: finalItemDetails } });
+        } else {
+            console.warn("[loadItemDetails] finalItemDetails is null, skipping column state dispatch for ID:", itemId);
         }
 
-        // Ensure regeneration status is properly set for columns
-        const updatedDetails = {
-          ...itemDetails,
-          markedForRegeneration: itemDetails.markedForRegeneration || false,
-          isMarkingForRegeneration: itemDetails.isMarkingForRegeneration || false,
-          // Ensure we're not inheriting the table's regeneration status
-          tableMarkedForRegeneration: details.markedForRegeneration || false
-        };
-        
-        dispatch({
-          type: 'UPDATE_ITEM',
-          payload: {
-            id: itemId,
-            updates: updatedDetails
-          }
-        });
-        
-        return updatedDetails;
-      } else {
-        itemDetails = details;
-        // Update column list when loading table details
-      if (details.columns) {
-        const columnsWithMetadata = details.columns.filter((col: any) => 
-          col.draftDescription || col.currentDescription || 
-          (col.metadata && Object.keys(col.metadata).length > 0)
-        );
-          console.log('Found columns with metadata:', columnsWithMetadata.length);
-        setTaggedColumns(columnsWithMetadata);
-          
-          // Only reset column index if we're not in column view or if this is a different table
-          if (!wasInColumnView || (previousItemId && !previousItemId.startsWith(itemId.split('#')[0]))) {
-        setCurrentColumnIndex(-1);
-          } else {
-            // Preserve column index if we were in column view and refreshing the same table
-            console.log('Preserving column index:', previousColumnIndex);
-          }
-          
-        setCurrentItemId(itemId);
+        // Update column list and index for navigation
+         if (details.columns) {
+            const columnsWithMetadata = details.columns.filter((col: any) => 
+                col.draftDescription || col.currentDescription || (col.metadata && Object.keys(col.metadata).length > 0)
+            );
+            setTaggedColumns(columnsWithMetadata);
+            const columnIndex = columnsWithMetadata.findIndex(col => col.name.endsWith(`.${columnName}`));
+            if (columnIndex !== -1) {
+                setCurrentColumnIndex(columnIndex);
+            }
         }
+        setCurrentItemId(currentTableId); // Ensure main item ID tracks the table
+
+      } else {
+        // --- Processing Table ---
+        const tableMetadata = details.metadata || {};
+        const acceptedStatus = tableMetadata['is-accepted'];
+        const acceptedTimestamp = tableMetadata['when-accepted'];
+        const isItemAccepted = acceptedStatus === true || String(acceptedStatus).toLowerCase() === 'true';
+
+        finalItemDetails = {
+           // Base fields from table details
+           id: itemId, // Table ID
+           type: 'table',
+           name: details.name,
+           currentDescription: details.currentDescription || '',
+           draftDescription: details.draftDescription || '',
+           isHtml: details.isHtml || false,
+           comments: details.comments || [],
+           tags: details.tags || {},
+
+           // Construct metadata, merging acceptance status
+           metadata: {
+               ...tableMetadata,
+               'is-accepted': isItemAccepted,
+               'when-accepted': acceptedTimestamp,
+           },
+
+           // Set top-level calculated fields
+           isAccepted: isItemAccepted,
+           whenAccepted: acceptedTimestamp,
+           status: isItemAccepted ? 'accepted' : (details.status || 'draft'),
+
+           // Other relevant fields
+           lastModified: details.lastModified || tableMetadata.generation_date || new Date().toISOString(),
+           markedForRegeneration: details.markedForRegeneration || tableMetadata.to_be_regenerated || false,
+           isMarkingForRegeneration: false, // Reset loading state
+           // columns: details.columns || [], // Removed - Not part of item state
+           currentColumn: null // Ensure currentColumn is null for table view
+        };
+
+        if (finalItemDetails) { // Add null check before dispatch
+          dispatch({ type: 'UPDATE_ITEM', payload: { id: itemId, updates: finalItemDetails } });
+        } else {
+            console.warn("[loadItemDetails] finalItemDetails is null, skipping table state dispatch for ID:", itemId);
+        }
+
+        // Update column list and index for navigation
+        if (details.columns) {
+            const columnsWithMetadata = details.columns.filter((col: any) => 
+                col.draftDescription || col.currentDescription || (col.metadata && Object.keys(col.metadata).length > 0)
+            );
+            setTaggedColumns(columnsWithMetadata);
+        }
+        setCurrentColumnIndex(-1); // Reset column index
+        setCurrentItemId(itemId); // Set current item ID to the table ID
       }
 
-      const updatedDetails = {
-        ...itemDetails,
-        currentColumn: !isColumn ? null : itemDetails.currentColumn,
-        markedForRegeneration: itemDetails.markedForRegeneration || false,
-        isMarkingForRegeneration: itemDetails.isMarkingForRegeneration || false,
-        lastModified: itemDetails.lastModified || new Date().toISOString()
-      };
-
-      // Update the item in state
-      dispatch({
-        type: 'UPDATE_ITEM',
-        payload: {
-          id: itemId,
-          updates: updatedDetails
-        }
-      });
-
-      // Cache both table and column details
+      console.log('[loadItemDetails] Dispatching final processed details:', finalItemDetails);
+      
+      // --- Update Cache ---
       const newCache = { ...detailsCache };
-      if (!isColumn) {
-        newCache[itemId] = updatedDetails;
-        // Cache all columns from this table
-        details.columns?.forEach((col: any) => {
-          const columnId = `${itemId}#column.${col.name.split('.').pop()}`;
-          newCache[columnId] = {
-            ...col,
-            tableMarkedForRegeneration: updatedDetails.markedForRegeneration || false
-          };
-        });
-      } else {
-        newCache[itemId] = updatedDetails;
+      if (finalItemDetails) {
+          // Cache the processed details (table or column) under its specific ID
+          newCache[finalItemDetails.id] = finalItemDetails; 
+          
+          // If it was a table, also cache its raw column data if needed elsewhere
+          // (Avoid caching processed columns here to prevent staleness)
+          if (finalItemDetails.type === 'table' && details.columns) {
+              details.columns.forEach((col: any) => {
+                  const colId = `${finalItemDetails!.id}#column.${col.name.split('.').pop()}`; // Add ! assertion
+                  if (!newCache[colId]) { // Only add if not already cached (e.g. by direct column load)
+                      newCache[colId] = { 
+                          ...col, 
+                           // Add minimal processing if needed, e.g., ensure metadata exists
+                           metadata: col.metadata || {}, 
+                          tableMarkedForRegeneration: finalItemDetails!.markedForRegeneration || false // Add ! assertion
+                        };
+                  }
+              });
+          }
+           // If it was a column, ensure the parent table entry in cache reflects this potentially updated column
+            if (finalItemDetails.type === 'column' && newCache[currentTableId]) {
+               // This logic might be complex - ensure you're not overwriting other columns
+               // It might be safer to just cache the column itself and let the table reload fully if needed
+               // Example: Update the columns array in the cached table data
+               // const parentTableCache = newCache[currentTableId];
+               // parentTableCache.columns = parentTableCache.columns?.map(c => c.id === finalItemDetails.id ? finalItemDetails : c) || [];
+            }
       }
       setDetailsCache(newCache);
 
-      return updatedDetails;
+      return finalItemDetails; // Return the processed data
 
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to load item details';
-      console.error('Error loading item details:', error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to load item details';
+      console.error('[loadItemDetails] Error loading item details:', error);
       setError(errorMessage);
       return null;
     } finally {
-      // Loading state is now handled by the caller when forceRefresh is true
-      // if (forceRefresh) { setIsLoadingDetails(false); }
-      
-      // Restore column view state if needed
-      if (isColumnView && currentColumnIndex >= 0 && itemId.includes('#column.')) {
-        console.log('loadItemDetails - Ensuring column view is preserved after refresh');
-        setIsColumnView(true);
+      if (showLoader) {
+          setIsLoadingDetails(false);
       }
     }
-  };
+  }; // End of loadItemDetails
 
   const preloadNextItem = async (currentIndex: number) => {
     if (currentIndex < items.length - 1) {
@@ -2021,18 +2061,23 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     
     if (isColumnView && currentItem.currentColumn) {
       // We're viewing a column
-              displayItem = {
-        ...currentItem.currentColumn,
+      // Cast currentColumn to extended MetadataItem to satisfy TypeScript
+      const currentColumnData = currentItem.currentColumn as MetadataItem;
+      displayItem = {
+        ...currentColumnData,
         // Ensure we have all required properties
-        id: currentItem.currentColumn.id || `${currentItem.id}#column.${currentItem.currentColumn.name.split('.').pop()}`,
+        id: currentColumnData.id || `${currentItem.id}#column.${currentColumnData.name.split('.').pop()}`,
         type: 'column', // Always set type to column when viewing a column
-        parentTableId: currentItem.id
+        parentTableId: currentItem.id,
+        // Ensure acceptance status is explicitly carried over
+        isAccepted: currentColumnData.isAccepted, 
+        whenAccepted: currentColumnData.whenAccepted 
       };
       console.log('Rendering column view:', displayItem.id);
-            } else {
+    } else {
       // We're viewing a table
-              displayItem = {
-                    ...currentItem,
+      displayItem = {
+        ...currentItem,
         // Ensure currentColumn is null
         currentColumn: null,
         type: 'table' // Always set type to table when viewing a table
@@ -2131,6 +2176,19 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
                       icon={<AutorenewIcon />}
                     />
                   )}
+                  {/* START: Add dedicated chip for accepted status */}
+                  {displayItem.isAccepted && (
+                    <Tooltip title={displayItem.whenAccepted ? `Accepted on ${new Date(displayItem.whenAccepted).toLocaleString()}` : 'Accepted'}>
+                      <Chip 
+                        label={`Accepted`}
+                        size="small"
+                        color="success"
+                        variant="filled"
+                        icon={<CheckCircleIcon fontSize="small" />} 
+                      />
+                    </Tooltip>
+                  )}
+                  {/* END: Add dedicated chip for accepted status */}
                   <Typography variant="body2" color="text.secondary">
                     Last modified: {new Date(displayItem.lastModified).toLocaleString()}
                   </Typography>
@@ -2307,15 +2365,16 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
                     <Typography variant="subtitle1" gutterBottom>Column-specific Debug Info:</Typography>
                     <Paper sx={{ p: 2, bgcolor: 'background.paper' }}>
                       <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {/* --- Fix Debug Panel Metadata --- START */}
                         {JSON.stringify({
-                          profile: displayItem.profile,
-                          metadata: {
-                            certified: displayItem.metadata?.certified,
-                            user_who_certified: displayItem.metadata?.user_who_certified,
-                            generation_date: displayItem.metadata?.generation_date,
-                            external_document_uri: displayItem.metadata?.external_document_uri
-                          }
-                        }, null, 2)}
+                            // Display the actual metadata object from the displayItem
+                            metadata: displayItem.metadata || {} 
+                        }, (key, value) => {
+                            // Optional filter: You might want to hide large fields like 'profile' here
+                            // if (key === 'profile' && value) return '[Profile Data Hidden]'; 
+                            return value; 
+                        }, 2)}
+                        {/* --- Fix Debug Panel Metadata --- END */}
                       </pre>
                     </Paper>
                   </Grid>

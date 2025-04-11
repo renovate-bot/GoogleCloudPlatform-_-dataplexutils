@@ -20,6 +20,7 @@ import toml
 import pkgutil
 import datetime
 import uuid
+import traceback
 
 # Cloud imports
 from google.cloud import dataplex_v1
@@ -613,7 +614,10 @@ class DataplexOperations:
             raise e
 
     def accept_column_draft_description(self, table_fqn, column_name):
-        """Move description from draft aspect to dataplex Overview and BQ for a specific column.
+        """Accepts the draft description for a column by:
+           1. Reading the draft description from the custom review aspect.
+           2. Updating the custom review aspect to mark it as accepted.
+           3. Updating the actual column description in BigQuery.
 
         Args:
             table_fqn (str): The fully qualified name of the table (project.dataset.table)
@@ -626,48 +630,117 @@ class DataplexOperations:
             Exception: If there's an error accessing or updating the entry
         """
         try:
-            # Create a client
+            logger.info(f"=== START: accept_column_draft_description for {table_fqn}.{column_name} ===")
             client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+            
+            aspect_type_id = constants["ASPECT_TEMPLATE"]["name"]
+            aspect_type = f"projects/{self._client._project_id}/locations/global/aspectTypes/{aspect_type_id}"
+            # Correct aspect name pattern for column aspects
+            aspect_name_key = f"projects/{self._client._project_id}/locations/global/aspectTypes/{aspect_type_id}@Schema.{column_name}"
 
-            aspect_types = [f"""projects/{self._client._project_id}/locations/global/aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}"""]
             project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
-
             entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
 
-            request = dataplex_v1.GetEntryRequest(
-                name=entry_name,
-                view=dataplex_v1.EntryView.CUSTOM,
-                aspect_types=aspect_types
-            )
-            overview = None
-            
-            entry = client.get_entry(request=request)
-            
-            for aspect_key, aspect in entry.aspects.items():
-                logger.info(f"Processing aspect: {aspect_key}")
-                logger.info(f"Aspect path: {aspect.path}")
-                
-                if aspect.aspect_type.endswith(f"""aspectTypes/{constants["ASPECT_TEMPLATE"]["name"]}""") and aspect.path == f"Schema.{column_name}":
-                    if "contents" in aspect.data:
-                        overview = aspect.data["contents"]
-                        logger.info(f"Found draft description for column {column_name}: {overview[:50]}...")
-                        break
+            # 1. Get the current entry with the specific aspect type
+            try:
+                get_request = dataplex_v1.GetEntryRequest(
+                    name=entry_name,
+                    view=dataplex_v1.EntryView.CUSTOM,
+                    aspect_types=[aspect_type] # Fetch aspects of this type
+                )
+                entry = client.get_entry(request=get_request)
+                logger.info(f"Successfully retrieved entry: {entry_name}")
+            except google.api_core.exceptions.NotFound:
+                 logger.error(f"Entry not found: {entry_name}")
+                 return False
+            except Exception as e:
+                 logger.error(f"Error getting entry {entry_name}: {e}")
+                 raise e # Re-raise other exceptions
 
-            if overview:
-                success = self._client._bigquery_ops.update_column_description(table_fqn, column_name, overview)
-                if success:
-                    logger.info(f"Successfully updated description for column {column_name} in table {table_fqn}")
-                    return True
+            draft_description = None
+            aspect_found = False
+            current_aspect_data = None
+
+            # 2. Find the specific column aspect and its data
+            if aspect_name_key in entry.aspects:
+                aspect = entry.aspects[aspect_name_key]
+                if aspect.path == f"Schema.{column_name}":
+                    aspect_found = True
+                    current_aspect_data = aspect.data
+                    if current_aspect_data and "contents" in current_aspect_data:
+                        draft_description = current_aspect_data["contents"]
+                        logger.info(f"Found draft description for column {column_name}: {draft_description[:50]}...")
+                    else:
+                         logger.warning(f"Aspect found for {column_name}, but 'contents' key is missing.")
                 else:
-                    logger.warning(f"Failed to update description for column {column_name} in table {table_fqn}")
-                    return False
+                    logger.warning(f"Aspect {aspect_name_key} found, but path mismatch: {aspect.path}")
             else:
-                logger.warning(f"No draft description found for column {column_name} in table {table_fqn}")
+                 logger.warning(f"Aspect key {aspect_name_key} not found in entry aspects for {column_name}. Available keys: {list(entry.aspects.keys())}")
+
+            if not aspect_found or draft_description is None:
+                logger.warning(f"No valid draft description aspect found for column {column_name}. Cannot accept.")
+                return False
+
+            # 3. Update the aspect data in memory
+            updated_aspect_data_dict = dict(current_aspect_data) # Convert MapComposite to dict
+            updated_aspect_data_dict["is-accepted"] = True
+            updated_aspect_data_dict["when-accepted"] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+            updated_aspect_data_dict["to-be-regenerated"] = False # Ensure regeneration flag is off
+
+            # Convert back to Struct for the API call
+            updated_data_struct = struct_pb2.Struct()
+            updated_data_struct.update(updated_aspect_data_dict)
+            
+            # 4. Prepare and execute the UpdateEntry request for the aspect
+            update_aspect = dataplex_v1.Aspect(
+                 aspect_type=aspect_type,
+                 path=f"Schema.{column_name}", # Ensure path is set correctly
+                 data=updated_data_struct
+            )
+            
+            update_entry_request = dataplex_v1.Entry(
+                 name=entry_name
+            )
+            update_entry_request.aspects[aspect_name_key] = update_aspect
+            
+            update_mask = field_mask_pb2.FieldMask(paths=[f"aspects.\"{aspect_name_key}\".data"]) # Update only the data part of this specific aspect
+            
+            request = dataplex_v1.UpdateEntryRequest(
+                entry=update_entry_request,
+                update_mask=update_mask,
+                allow_missing=False, # Aspect should exist
+                # aspect_keys=[aspect_name_key] # Might not be needed with specific update_mask
+            )
+            
+            try:
+                 logger.info(f"Attempting to update aspect {aspect_name_key} for entry {entry_name}...")
+                 client.update_entry(request=request)
+                 logger.info(f"Successfully updated aspect metadata for column {column_name} to mark as accepted.")
+            except Exception as e:
+                 logger.error(f"Failed to update aspect metadata for column {column_name}: {e}")
+                 logger.error(f"Traceback: {traceback.format_exc()}")
+                 # Don't proceed to BQ update if aspect update fails
+                 return False 
+
+            # 5. Update BigQuery description (only if aspect update succeeded)
+            logger.info(f"Proceeding to update BigQuery description for column {column_name}.")
+            success_bq = self._client._bigquery_ops.update_column_description(table_fqn, column_name, draft_description)
+            
+            if success_bq:
+                logger.info(f"Successfully accepted and updated description for column {column_name} in table {table_fqn}")
+                return True
+            else:
+                logger.warning(f"Aspect metadata updated, but failed to update BigQuery description for column {column_name}.")
+                # Consider if this should be True or False - aspect is marked accepted, but BQ failed.
+                # Returning False for now to indicate incomplete operation.
                 return False
                 
         except Exception as e:
-            logger.error(f"Exception in accept_column_draft_description: {e}")
+            logger.error(f"Unexpected exception in accept_column_draft_description: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
+        finally:
+             logger.info(f"=== END: accept_column_draft_description for {table_fqn}.{column_name} ===")
 
     def get_table_quality(self, use_data_quality, table_fqn):
         """Gets the quality information for a table from Dataplex.
