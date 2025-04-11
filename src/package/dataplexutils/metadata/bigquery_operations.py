@@ -189,7 +189,7 @@ class BigQueryOperations:
             table = client.get_table(f"{project_id}.{dataset_id}.{table_id}")
             
             schema = list(table.schema)
-            for field in schema:
+            for i, field in enumerate(schema):
                 if field.name == column_name:
                     # Get existing description and format the new one
                     existing_description = field.description or ""
@@ -198,7 +198,16 @@ class BigQueryOperations:
                         description, 
                         self._client._client_options._description_handling
                     )
-                    field.description = combined_description
+                    # Create a new SchemaField with the updated description
+                    new_field = bigquery.SchemaField(
+                        name=field.name,
+                        field_type=field.field_type,
+                        mode=field.mode,
+                        description=combined_description,
+                        fields=field.fields,
+                        policy_tags=field.policy_tags
+                    )
+                    schema[i] = new_field  # Replace the old field with the new one
                     break
             
             table.schema = schema

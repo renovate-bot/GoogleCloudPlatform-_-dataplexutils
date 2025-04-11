@@ -398,8 +398,9 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       // Update both state and cache with the accepted status
       const updatedItem: Partial<MetadataItem> = {
         status: 'accepted' as const,
-        currentDescription: item.draftDescription,
-        whenAccepted: new Date().toISOString()
+        currentDescription: item.draftDescription, // Update current description in UI
+        whenAccepted: new Date().toISOString(),
+        isAccepted: true // <-- Add this line
       };
 
       // Update the item in state without changing the current view
@@ -1597,25 +1598,60 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     
     // Use cached data if available
     if (detailsCache[nextColumnId]) {
+        const cachedColumnData = detailsCache[nextColumnId];
+        console.log(`[handleNextColumn] Using cached details for ${nextColumnId}:`, cachedColumnData);
+
+        // --- START: Process cached data similar to loadItemDetails ---
+        const columnMetadata = cachedColumnData.metadata || {};
+        const acceptedStatus = columnMetadata['is-accepted'];
+        const acceptedTimestamp = columnMetadata['when-accepted'];
+        const isItemAccepted = acceptedStatus === true || String(acceptedStatus).toLowerCase() === 'true';
+
+        const processedColumnItem: MetadataItem = {
+            ...columnItem, // Start with base constructed item
+            ...cachedColumnData, // Overwrite with raw cached data
+            // Explicitly set derived fields:
+            metadata: { // Ensure metadata includes derived status
+                 ...columnMetadata,
+                'is-accepted': isItemAccepted,
+                'when-accepted': acceptedTimestamp,
+            },
+            isAccepted: isItemAccepted,
+            whenAccepted: acceptedTimestamp,
+            status: isItemAccepted ? 'accepted' : (cachedColumnData.status || 'draft'),
+            // Ensure other necessary fields from MetadataItem interface are present
+            currentDescription: cachedColumnData.currentDescription || columnItem.currentDescription || '',
+            draftDescription: cachedColumnData.draftDescription || columnItem.draftDescription || '',
+            comments: cachedColumnData.comments || columnItem.comments || [],
+            markedForRegeneration: cachedColumnData.markedForRegeneration || columnItem.markedForRegeneration || false,
+            isMarkingForRegeneration: cachedColumnData.isMarkingForRegeneration || columnItem.isMarkingForRegeneration || false,
+        };
+        console.log(`[handleNextColumn] Processed cached item for dispatch:`, processedColumnItem);
+        // --- END: Process cached data ---
+
         dispatch({
           type: 'UPDATE_ITEM',
           payload: {
           id: tableId, // Update the current table item
           updates: {
-            currentColumn: columnItem
+            // Use the fully processed item
+            currentColumn: processedColumnItem
           }
         }
       });
-      
-      // Also update the column's data separately
-        dispatch({
+
+       // Also update the column's standalone data in state/cache if necessary
+       dispatch({
           type: 'UPDATE_ITEM',
           payload: {
           id: nextColumnId,
-          updates: detailsCache[nextColumnId]
+          updates: processedColumnItem // Update the specific column item state
         }
       });
+
     } else {
+      // Only load if not in cache - table refresh should have cached it.
+      console.log(`[handleNextColumn] Cache miss for ${nextColumnId}, calling loadItemDetails`);
       loadItemDetails(nextColumnId);
     }
   };
@@ -1684,25 +1720,59 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
     
     // Use cached data if available
     if (detailsCache[prevColumnId]) {
+        const cachedColumnData = detailsCache[prevColumnId];
+        console.log(`[handlePrevColumn] Using cached details for ${prevColumnId}:`, cachedColumnData);
+
+        // --- START: Process cached data similar to loadItemDetails ---
+        const columnMetadata = cachedColumnData.metadata || {};
+        const acceptedStatus = columnMetadata['is-accepted'];
+        const acceptedTimestamp = columnMetadata['when-accepted'];
+        const isItemAccepted = acceptedStatus === true || String(acceptedStatus).toLowerCase() === 'true';
+
+        const processedColumnItem: MetadataItem = {
+            ...columnItem, // Start with base constructed item
+            ...cachedColumnData, // Overwrite with raw cached data
+            // Explicitly set derived fields:
+            metadata: { // Ensure metadata includes derived status
+                 ...columnMetadata,
+                'is-accepted': isItemAccepted,
+                'when-accepted': acceptedTimestamp,
+            },
+            isAccepted: isItemAccepted,
+            whenAccepted: acceptedTimestamp,
+            status: isItemAccepted ? 'accepted' : (cachedColumnData.status || 'draft'),
+            // Ensure other necessary fields from MetadataItem interface are present
+            currentDescription: cachedColumnData.currentDescription || columnItem.currentDescription || '',
+            draftDescription: cachedColumnData.draftDescription || columnItem.draftDescription || '',
+            comments: cachedColumnData.comments || columnItem.comments || [],
+            markedForRegeneration: cachedColumnData.markedForRegeneration || columnItem.markedForRegeneration || false,
+            isMarkingForRegeneration: cachedColumnData.isMarkingForRegeneration || columnItem.isMarkingForRegeneration || false,
+        };
+        console.log(`[handlePrevColumn] Processed cached item for dispatch:`, processedColumnItem);
+        // --- END: Process cached data ---
+
         dispatch({
           type: 'UPDATE_ITEM',
           payload: {
           id: tableId, // Update the current table item
           updates: {
-            currentColumn: columnItem
+            // Use the fully processed item
+            currentColumn: processedColumnItem
           }
         }
       });
-      
-      // Also update the column's data separately
+
+      // Also update the column's standalone data in state/cache if necessary
         dispatch({
           type: 'UPDATE_ITEM',
           payload: {
           id: prevColumnId,
-          updates: detailsCache[prevColumnId]
+          updates: processedColumnItem // Update the specific column item state
         }
       });
     } else {
+       // Only load if not in cache - table refresh should have cached it.
+      console.log(`[handlePrevColumn] Cache miss for ${prevColumnId}, calling loadItemDetails`);
       loadItemDetails(prevColumnId);
     }
   };
@@ -1882,14 +1952,25 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
 
         // Update the parent table item in state to hold this column as current
         if (finalItemDetails) { // Add null check before dispatch
-          dispatch({ 
-              type: 'UPDATE_ITEM', 
-              payload: { 
+          // --- Add logging before dispatch --- START
+          console.log('[loadItemDetails - Column] Pre-dispatch check:', {
+              finalItemDetails_isAccepted: finalItemDetails.isAccepted,
+              finalItemDetails_status: finalItemDetails.status,
+              finalItemDetails_metadata_exists: !!finalItemDetails.metadata,
+              finalItemDetails_metadata_content: JSON.stringify(finalItemDetails.metadata)
+          });
+          // --- Add logging before dispatch --- END
+
+          console.log('[loadItemDetails - Column] Dispatching update for Table ID:', currentTableId, 'with currentColumn:', /* Avoid logging potentially large object */ 'details omitted');
+          dispatch({
+              type: 'UPDATE_ITEM',
+              payload: {
                   id: currentTableId, // Update the parent table item
                   updates: { currentColumn: finalItemDetails } // Set the processed column as current
-              } 
+              }
           });
            // Also update the specific column item in state if it exists or is needed
+           console.log('[loadItemDetails - Column] Dispatching update for Column ID:', itemId, 'with details:', /* Avoid logging potentially large object */ 'details omitted');
           dispatch({ type: 'UPDATE_ITEM', payload: { id: itemId, updates: finalItemDetails } });
         } else {
             console.warn("[loadItemDetails] finalItemDetails is null, skipping column state dispatch for ID:", itemId);
@@ -2366,13 +2447,13 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
                     <Paper sx={{ p: 2, bgcolor: 'background.paper' }}>
                       <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                         {/* --- Fix Debug Panel Metadata --- START */}
-                        {JSON.stringify({
+                        {JSON.stringify(
                             // Display the actual metadata object from the displayItem
-                            metadata: displayItem.metadata || {} 
-                        }, (key, value) => {
+                            displayItem.metadata || {} // <-- Display the metadata object directly
+                        , (key, value) => {
                             // Optional filter: You might want to hide large fields like 'profile' here
-                            // if (key === 'profile' && value) return '[Profile Data Hidden]'; 
-                            return value; 
+                            // if (key === 'profile' && value) return '[Profile Data Hidden]';
+                            return value;
                         }, 2)}
                         {/* --- Fix Debug Panel Metadata --- END */}
                       </pre>
