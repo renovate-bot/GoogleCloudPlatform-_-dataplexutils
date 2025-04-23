@@ -702,7 +702,21 @@ def get_review_items(
             
             logger.info(f"Getting review items for project {dataset_settings.project_id}")
                 
-            result = client._review_ops.get_review_items_for_dataset(dataset_fqn=dataset_settings.dataset_id)
+            # --- START: Fix dataset_fqn construction and handling --- 
+            # Construct the full dataset FQN if dataset_id is provided
+            dataset_fqn = None
+            if dataset_settings.dataset_id:
+                dataset_fqn = f"{dataset_settings.project_id}.{dataset_settings.dataset_id}"
+                logger.info(f"Constructed dataset FQN: {dataset_fqn}")
+            else:
+                logger.info(f"No specific dataset ID provided, fetching for project: {dataset_settings.project_id}")
+                # Assuming None signifies fetching for the whole project
+                # Adjust if the underlying library function expects something else (e.g., project_id)
+            
+            # Call the underlying function with the potentially None dataset_fqn
+            result = client._review_ops.get_review_items_for_dataset(dataset_fqn=dataset_fqn)
+            # --- END: Fix dataset_fqn construction and handling ---
+            
             logger.info(f"Raw result from review_ops: {result}")
             
             # --- Start of added filtering logic ---
@@ -927,7 +941,7 @@ def get_review_item_details(
             raise ValueError(f"No details found for {'column ' + column_name if column_name else 'table'} {table_fqn}")
         
         # --- Add logging before returning --- START
-        logger.info(f"Returning details to frontend: {details}")
+        # logger.info(f"Returning details to frontend: {details}") # Commented out this line
         # --- Add logging before returning --- END
         
         # Return the details directly without wrapping in data field
