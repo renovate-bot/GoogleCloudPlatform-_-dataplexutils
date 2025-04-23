@@ -586,127 +586,12 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
         newCache[item.id] = updatedCacheEntry; // Set the updated entry in the new cache object
         return newCache; // Return the entire updated cache
       });
-
-      // Background refresh the item details without changing the current view
-      // +++ START: Skip background refresh for columns to prevent navigation interruption +++
-      // Always skip background refresh for columns now, as state/cache update should be sufficient
-      if (viewMode === 'review' && !isColumn) { 
-      // +++ END: Skip background refresh for columns to prevent navigation interruption +++
-        try {
-          // Only update the cache for the accepted item, don't change the current view
-          const [itemProjectId, itemDatasetId, itemTableId] = tableFqn.split('.');
-          const standardTableId = `${tableFqn}#table`;
-          
-          // Get fresh data for the item that was accepted
-          const response = await axios.post(`${apiUrlBase}/metadata/review/details`, {
-            client_settings: {
-              project_id: config.project_id,
-              llm_location: config.llm_location,
-              dataplex_location: config.dataplex_location,
-            },
-            table_settings: {
-              project_id: itemProjectId,
-              dataset_id: itemDatasetId,
-              table_id: itemTableId,
-            },
-            column_settings: isColumn ? {
-              column_name: columnName
-            } : undefined
-          });
-          
-          const details = response.data;
-          
-          // Check if the user has navigated away again (might have changed during this second API call)
-          const currentDisplayIdAfterRefresh = isColumnView ? 
-            (currentItemId && currentColumnIndex >= 0 ? 
-              `${currentItemId}#column.${taggedColumns[currentColumnIndex]?.name?.split('.').pop()}` : 
-              currentItemId) : 
-            currentItemId;
-          const userNavigatedAwayDuringRefresh = initiallyDisplayedItemId !== currentDisplayIdAfterRefresh;
-          
-          console.log('[handleAccept] Navigation check after refresh API:', {
-            initial: initiallyDisplayedItemId,
-            current: currentDisplayIdAfterRefresh,
-            userNavigatedAwayDuringRefresh
-          });
-          
-          // Update the cache with the fresh data - BUT be very careful not to replace content for items
-          // that are currently being displayed if the user navigated away
-          const newCache = { ...detailsCache };
-          
-          // Only update column content if the user hasn't navigated away
-          const shouldPreserveDisplayContent = userNavigatedAway || userNavigatedAwayDuringRefresh;
-          
-          // Update the table entry in the cache
-          if (shouldPreserveDisplayContent && standardTableId === currentDisplayIdAfterRefresh) {
-            // User is viewing this table - just update metadata, not content that would replace the display
-            console.log('[handleAccept] Preserving display content for table being viewed:', standardTableId);
-            newCache[standardTableId] = {
-              ...newCache[standardTableId],
-              status: details.status,
-              lastModified: details.lastModified,
-              isAccepted: details.isAccepted,
-              whenAccepted: details.whenAccepted
-              // NOT updating descriptions or other visible content
-            };
-          } else {
-            // Safe to update complete table data
-            newCache[standardTableId] = details;
-          }
-          
-          // Cache all columns from this table - BUT preserve content for the currently viewed column
-          if (details.columns) {
-            details.columns.forEach((col: any) => {
-              const colName = col.name.split('.').pop();
-              const columnId = `${standardTableId}#column.${colName}`;
-              
-              if (shouldPreserveDisplayContent && columnId === currentDisplayIdAfterRefresh) {
-                // This column is currently being viewed - preserve its display content
-                console.log('[handleAccept] Preserving display content for column being viewed:', columnId);
-                newCache[columnId] = {
-                  ...newCache[columnId],
-                  status: col.status,
-                  lastModified: col.lastModified,
-                  isAccepted: col.isAccepted,
-                  whenAccepted: col.whenAccepted,
-                  tableMarkedForRegeneration: details.markedForRegeneration || false
-                  // NOT updating descriptions or other visible content
-                };
-              } else {
-                // Safe to update complete column data
-                newCache[columnId] = {
-                  ...col,
-                  tableMarkedForRegeneration: details.markedForRegeneration || false
-                };
-              }
-            });
-          }
-          
-          // Update the cache
-          setDetailsCache(newCache);
-          
-          // Show success notification
-          setNotification({
-            message: 'Metadata accepted successfully',
-            severity: 'success',
-            loading: false
-          });
-          
-          // Clear notification after 3 seconds
-          setTimeout(() => setNotification(null), 3000);
-        } catch (error) {
-          console.error('Error refreshing item details after accept:', error);
-          // Show error notification
-          setNotification({
-            message: 'Metadata accepted, but refresh failed',
-            severity: 'error',
-            loading: false
-          });
-          
-          // Clear notification after 3 seconds
-          setTimeout(() => setNotification(null), 3000);
-        }
-      }
+      
+      // Once the accept is completed, clear the accept state
+      setTimeout(() => {
+        console.log('[handleAccept] Clearing accept state after process completes');
+        setIsAccepting({});
+      }, 300); // Short delay to ensure UI feedback is visible
 
     } catch (error: any) {
       console.error('API Error:', error);
@@ -1149,135 +1034,35 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       // but don't trigger a refresh now (it takes too long)
       // ONLY update the cache if the user hasn't navigated away
       if (!userNavigatedAway) {
-        setDetailsCache(prev => ({
-          ...prev,
-          [itemId]: undefined
-        }));
-      } else {
-        console.log('[handleMarkForRegeneration] User navigated away, skipping cache clear to prevent content replacement');
-      }
-
-      // Instead of refreshing the item details, just update the UI state
-      // This avoids the long wait for regeneration
-      if (isColumn) {
-        // For columns, update both the column and the parent table UI
-        // BUT ONLY modify UI if this is still the item being viewed
-        dispatch({
-          type: 'UPDATE_ITEM',
-          payload: { 
-            id: itemId, 
-            updates: { 
-              markedForRegeneration: true,
-              isMarkingForRegeneration: false
-            } 
+        // Instead of clearing the cache entry, update it in place
+        setDetailsCache(prev => {
+          const existingEntry = prev[itemId];
+          if (!existingEntry) {
+            // If no existing entry, nothing to update
+            return prev;
           }
-        });
-        
-        // Update the column within the parent table
-        const tableItem = items.find(i => i.id === tableId);
-        if (tableItem && tableItem.currentColumn) {
-          if (userNavigatedAway) {
-            // Don't change the currentColumn of the table if user navigated away
-            // Just update the marking status in the items array, not the display
-            console.log('[handleMarkForRegeneration] User navigated away, not updating displayed column');
-            
-            // Update the item in the state without changing display
-            dispatch({
-              type: 'UPDATE_ITEM',
-              payload: { id: itemId, updates: { 
-                markedForRegeneration: true,
-                isMarkingForRegeneration: false
-              }}
-            });
-          } else {
-            // User is still viewing the same item, update the display
-            console.log('[handleMarkForRegeneration] User still viewing same item, updating display');
-            const updatedTable = {
-              ...tableItem,
-              currentColumn: {
-                ...tableItem.currentColumn,
-                markedForRegeneration: true,
-                isMarkingForRegeneration: false
-              }
-            };
-            
-            dispatch({
-              type: 'UPDATE_ITEM',
-              payload: { id: tableId, updates: updatedTable }
-            });
-          }
-        }
-      } else {
-        // For tables, just update the table UI state without full refresh
-        dispatch({
-          type: 'UPDATE_ITEM',
-          payload: { 
-            id: itemId, 
-            updates: { 
-              markedForRegeneration: true,
-              isMarkingForRegeneration: false
-            } 
-          }
-        });
-        
-        // Also update the in-memory cache to reflect this change
-        if (detailsCache[itemId]) {
-          const updatedCache = {
-            ...detailsCache,
+          
+          // Update the cache with the new status but keep all other content
+          return {
+            ...prev,
             [itemId]: {
-              ...detailsCache[itemId],
+              ...existingEntry,
               markedForRegeneration: true,
               isMarkingForRegeneration: false
             }
           };
-          setDetailsCache(updatedCache);
-        }
-      }
-
-      // If the user has navigated away while the operation was in progress,
-      // ensure we don't disrupt their current view by forcing a reload of the marked item
-      if (userNavigatedAway && isColumn) {
-        console.log('User navigated away during background process. Preserving current view:', currentDisplayedItemId);
-      }
-
-      setError(null);
-    } catch (error: any) {
-      console.error('Error marking for regeneration:', error);
-      
-      // Reset loading state on error
-      if (itemId.includes('#column.')) {
-        // For columns, reset both the column and the parent table
-        const tableId = itemId.split('#column.')[0];
-        
-          dispatch({
-            type: 'UPDATE_ITEM',
-          payload: { id: itemId, updates: { isMarkingForRegeneration: false } }
         });
-        
-        // Reset the column within the parent table
-        const tableItem = items.find(i => i.id === tableId);
-          if (tableItem && tableItem.currentColumn) {
-            const updatedTable = {
-              ...tableItem,
-              currentColumn: {
-                ...tableItem.currentColumn,
-                isMarkingForRegeneration: false
-              }
-            };
-            
-            dispatch({
-              type: 'UPDATE_ITEM',
-            payload: { id: tableId, updates: updatedTable }
-            });
-          }
       } else {
-        // For tables, just reset the table
-          dispatch({
-            type: 'UPDATE_ITEM',
-          payload: { id: itemId, updates: { isMarkingForRegeneration: false } }
-        });
+        console.log('[handleMarkForRegeneration] User navigated away, skipping cache clear to prevent content replacement');
       }
-      
+
+      // For tables, just reset the table
+      dispatch({
+        type: 'UPDATE_ITEM',
+        payload: { id: itemId, updates: { isMarkingForRegeneration: false } }
+      });
+    } catch (error: any) {
+      // Add proper error handling here
       setError(error.message || 'Failed to mark for regeneration');
     }
   };
@@ -1911,10 +1696,10 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   };
 
   const handleNextColumn = () => {
-    // Don't navigate if any background processes are running
+    // Instead of blocking navigation, just log that there's a process running
     if (Object.values(isAccepting).some(value => value === true)) {
-      console.log('[handleNextColumn] Skipping navigation - background accept process is running');
-      return;
+      console.log('[handleNextColumn] Navigation during background accept process - this is allowed but may cause visual effects');
+      // Continue with navigation - don't return
     }
 
     const tableId = currentItemId;
@@ -1989,7 +1774,12 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           
           // After brief delay, clear the flag to allow other operations (just safety)
           setTimeout(() => {
-            hasManuallySetColumnFlag.current = false;
+            if (!Object.values(isAccepting).some(value => value === true)) {
+              // Only clear if no accept process is running
+              hasManuallySetColumnFlag.current = false;
+            } else {
+              console.log('[Navigation] Accept process is still running, keeping navigation flag active');
+            }
           }, 1000);
         }
       }
@@ -2001,10 +1791,10 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
   };
 
   const handlePrevColumn = () => {
-    // Don't navigate if any background processes are running
+    // Instead of blocking navigation, just log that there's a process running
     if (Object.values(isAccepting).some(value => value === true)) {
-      console.log('[handlePrevColumn] Skipping navigation - background accept process is running');
-      return;
+      console.log('[handlePrevColumn] Navigation during background accept process - this is allowed but may cause visual effects');
+      // Continue with navigation - don't return
     }
     
     const tableId = currentItemId;
@@ -2073,7 +1863,12 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           
           // After brief delay, clear the flag to allow other operations (just safety)
           setTimeout(() => {
-            hasManuallySetColumnFlag.current = false;
+            if (!Object.values(isAccepting).some(value => value === true)) {
+              // Only clear if no accept process is running
+              hasManuallySetColumnFlag.current = false;
+            } else {
+              console.log('[Navigation] Accept process is still running, keeping navigation flag active');
+            }
           }, 1000);
         }
       }
@@ -2361,13 +2156,15 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
           
           // Check if we should update the display or just cache the data
           const loadedColumnId = finalItemDetails.id;
-          const shouldUpdateDisplay = currentlyDisplayedColumnId === loadedColumnId && !hasManuallySetColumnFlag.current;
+          const isNavigationActive = hasManuallySetColumnFlag.current;
+          const shouldUpdateDisplay = currentlyDisplayedColumnId === loadedColumnId && !isNavigationActive;
           
           console.log('[loadItemDetails - Column] Display check:', {
             currentlyDisplayedColumnId,
             loadedColumnId,
             shouldUpdateDisplay,
             currentColumnIndex,
+            isNavigationActive,
             hasManuallySetFlag: hasManuallySetColumnFlag.current
           });
 
@@ -2613,6 +2410,17 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ config }) => {
       // If we've got a mismatch between selected index and displayed column, 
       // we should try to get the correct column
       let columnData = currentItem.currentColumn;
+      const isAcceptingAnyItem = Object.values(isAccepting).some(value => value === true);
+      
+      // If there's a process running or a mismatch, we need to be extra careful about the display
+      if (hasManuallySetColumnFlag.current || isAcceptingAnyItem || (targetColumnId && targetColumnId !== currentColumnId)) {
+        console.log('Special handling needed for column display:', {
+          hasManuallySetColumnFlag: hasManuallySetColumnFlag.current, 
+          isAcceptingAnyItem,
+          targetColumnId, 
+          currentColumnId
+        });
+      }
       
       if (targetColumnId && targetColumnId !== currentColumnId) {
         console.log('MISMATCH: currentColumn does not match currentColumnIndex, attempting to find correct column');
