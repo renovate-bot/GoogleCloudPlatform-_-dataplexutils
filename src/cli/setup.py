@@ -28,7 +28,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "metadata-wizard=metadata_wizard_cli.cli:main",
+            "metadata_wizard=metadata_wizard_cli.cli:main",
         ],
     },
     python_requires=">=3.7",

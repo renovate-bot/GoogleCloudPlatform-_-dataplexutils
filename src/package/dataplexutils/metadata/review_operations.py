@@ -157,7 +157,7 @@ class ReviewOperations:
                     
                     if hasattr(entry, 'entry_source') and hasattr(entry.entry_source, 'description'):
                         current_description = entry.entry_source.description
-                        logger.info(f"Found description for {table_fqn}: {current_description}")
+                        # logger.info(f"Found description for {table_fqn}: {current_description}")
                     
                     review_item = {
                         "id": f"{table_fqn}#table",
@@ -446,7 +446,7 @@ class ReviewOperations:
                 "metadata": metadata,
                 "tags": column_tags
             }
-            logger.debug(f"Returning column details for {column.name}: {result}") # Log final result
+            # logger.debug(f"Returning column details for {column.name}: {result}") # Log final result
             return result
             
         except Exception as e:

@@ -71,13 +71,23 @@ function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
 
   const handleTaskAdd = (task: Task) => {
-    setTasks([...tasks, task]);
+    console.log('Adding task:', task);
+    setTasks(prevTasks => {
+      const newTasks = [...prevTasks, task];
+      console.log('Tasks after add:', newTasks);
+      return newTasks;
+    });
   };
 
   const handleTaskUpdate = (taskId: string, updates: Partial<Task>) => {
-    setTasks(tasks.map(task => 
-      task.id === taskId ? { ...task, ...updates } : task
-    ));
+    console.log(`Updating task ${taskId} with:`, updates);
+    setTasks(prevTasks => {
+      const newTasks = prevTasks.map(task => 
+        task.id === taskId ? { ...task, ...updates } : task
+      );
+      console.log('Tasks after update:', newTasks);
+      return newTasks;
+    });
   };
 
   const theme = createTheme({
@@ -139,6 +149,8 @@ function App() {
       }
     }
   });
+
+  console.log('Rendering App, current tasks:', tasks);
 
   return (
     <CacheProvider>
