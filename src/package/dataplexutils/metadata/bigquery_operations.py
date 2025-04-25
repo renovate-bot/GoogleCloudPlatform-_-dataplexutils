@@ -219,6 +219,37 @@ class BigQueryOperations:
             logger.error(f"Exception updating column description: {e}.")
             raise e
 
+    def get_job_query(self, bq_job_id: str, job_location: str):
+        """Retrieves the query text associated with a BigQuery job.
+
+        Args:
+            bq_job_id (str): The ID of the BigQuery job.
+            job_location (str): The location where the job ran.
+
+        Returns:
+            str: The SQL query text of the job, or None if not found or not a query job.
+
+        Raises:
+            Exception: If there is an error retrieving the job information beyond NotFound.
+        """
+        try:
+            bq_client = self._client._cloud_clients[constants["CLIENTS"]["BIGQUERY"]]
+            # Fetch the job details. Project ID is inferred from the client.
+            job = bq_client.get_job(job_id=bq_job_id, location=job_location)
+            # Check if the job has a query attribute
+            if hasattr(job, 'query') and job.query:
+                return job.query
+            else:
+                logger.warning(f"Job {bq_job_id} in location {job_location} does not have query information.")
+                return None
+        except NotFound:
+            logger.warning(f"BigQuery job {bq_job_id} not found in location {job_location}.")
+            return None
+        except Exception as e:
+            logger.error(f"Exception retrieving query for job {bq_job_id} in location {job_location}: {e}")
+            # Re-raise the exception as it might be unexpected
+            raise e
+
     def update_table_schema(self, table_fqn, schema):
         """Updates the schema of a BigQuery table.
 

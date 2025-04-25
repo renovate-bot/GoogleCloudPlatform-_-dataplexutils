@@ -79,7 +79,7 @@ const TopNavBar: React.FC<TopNavBarProps> = ({ tasks }) => {
           component="div"
           sx={{ display: { xs: 'none', sm: 'block' } }}
         >
-          Metadata Manager
+          Metadata Manager (Experimental)
         </Typography>
         
         <Box sx={{ flexGrow: 1 }} />

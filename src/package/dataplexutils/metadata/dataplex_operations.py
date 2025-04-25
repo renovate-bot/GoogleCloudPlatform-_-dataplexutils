@@ -26,6 +26,7 @@ import traceback
 from google.cloud import dataplex_v1
 from google.protobuf import field_mask_pb2, struct_pb2, json_format
 import google.api_core.exceptions
+from google.cloud import datacatalog_lineage_v1
 
 # Load constants
 constants = toml.loads(pkgutil.get_data(__name__, "constants.toml").decode())
@@ -689,7 +690,7 @@ class DataplexOperations:
                 return False
 
             new_entry = dataplex_v1.Entry()
-            new_entry.name = entry_name
+            new_entry.name = entry.name
             new_entry.aspects[aspect_name] = new_aspect
 
 
@@ -807,78 +808,170 @@ class DataplexOperations:
             return None
 
     def get_table_sources_info(self, use_lineage_tables, table_fqn):
-        """Gets source table information from Dataplex.
+        """Gets source table information using Data Catalog Lineage API.
 
         Args:
             use_lineage_tables (bool): Whether to use lineage table information
             table_fqn (str): The fully qualified name of the table
 
         Returns:
-            dict: Source table information or None if not available/enabled
+            list: List of dictionaries containing source table info (name, schema, description)
+                  or an empty list if not enabled or no sources found.
         """
         if not use_lineage_tables:
-            return None
-            
-        try:
-            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
-            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
-            
-            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
-            aspect_type = "projects/dataplex-types/locations/global/aspectTypes/lineage"
-            aspect_types = [aspect_type]
+            return []
 
-            request = dataplex_v1.GetEntryRequest(
-                name=entry_name,
-                view=dataplex_v1.EntryView.CUSTOM,
-                aspect_types=aspect_types
-            )
-            
-            entry = client.get_entry(request=request)
-            for aspect_key, aspect in entry.aspects.items():
-                if aspect_key.endswith("global.lineage") and aspect.path == "":
-                    return dict(aspect.data)
-            return None
-            
+        try:
+            table_sources_info = []
+            # Assumes a _get_table_sources method exists or is added, similar to the backup
+            table_sources = self._get_table_sources(table_fqn) 
+            for table_source in table_sources:
+                # Assumes these helper methods exist on the BigQueryOperations part of the client
+                source_schema, _ = self._client._bigquery_ops.get_table_schema(table_source) 
+                source_description = self._client._bigquery_ops.get_table_description(table_source)
+                table_sources_info.append(
+                    {
+                        "source_table_name": table_source,
+                        "source_table_schema": source_schema,
+                        "source_table_description": source_description,
+                    }
+                )
+            # Check if the option should be disabled if no info was found
+            if not table_sources_info:
+                logger.warning(f"No lineage source table info found for {table_fqn}, disabling option for subsequent prompts if applicable.")
+                # Consider if self._client._client_options._use_lineage_tables = False is needed here
+            return table_sources_info
         except Exception as e:
             logger.error(f"Error getting table sources info for {table_fqn}: {e}")
-            return None
+            # Return empty list on error to avoid breaking flows
+            return []
+
+    def _get_table_sources(self, table_fqn):
+        """Gets source tables for a given table using Data Catalog Lineage API.
+
+        Args:
+            table_fqn (str): The fully qualified name of the target table.
+
+        Returns:
+            list: A list of fully qualified names of source tables.
+        """
+        try:
+            lineage_client = self._client._cloud_clients[constants["CLIENTS"]["DATA_CATALOG_LINEAGE"]]
+            target = datacatalog_lineage_v1.EntityReference()
+            target.fully_qualified_name = f"bigquery:{table_fqn}"
+            target_dataset_location = str(self._get_dataset_location(table_fqn)).lower()
+            logger.info(f"Searching for lineage links targeting table {table_fqn} in location {target_dataset_location}")
+
+            request = datacatalog_lineage_v1.SearchLinksRequest(
+                parent=f"projects/{self._client._project_id}/locations/{target_dataset_location}",
+                target=target,
+            )
+
+            link_results = lineage_client.search_links(request=request)
+            table_sources = []
+            for link in link_results:
+                # Ensure the link is pointing *to* the target table
+                if link.target == target:
+                    source_fqn = link.source.fully_qualified_name
+                    if source_fqn.startswith("bigquery:"):
+                         table_sources.append(source_fqn.replace("bigquery:", ""))
+                    else:
+                        logger.debug(f"Skipping non-BigQuery source: {source_fqn}")
+
+            logger.info(f"Found {len(table_sources)} BigQuery source(s) for {table_fqn}")
+            return table_sources
+        except google.api_core.exceptions.NotFound:
+            logger.warning(f"No lineage links found for table {table_fqn} in location {target_dataset_location}")
+            return []
+        except Exception as e:
+            logger.error(f"Exception getting table sources for {table_fqn}: {e}")
+            # Re-raise the exception after logging, or return [] depending on desired behavior
+            raise e # Or return []
 
     def get_job_sources(self, use_lineage_processes, table_fqn):
-        """Gets job source information from Dataplex.
+        """Gets job source information using Data Catalog Lineage API.
 
         Args:
             use_lineage_processes (bool): Whether to use lineage process information
             table_fqn (str): The fully qualified name of the table
 
         Returns:
-            dict: Job source information or None if not available/enabled
+            list: List of BigQuery job SQL queries that produced the table,
+                  or an empty list if not enabled or no jobs found.
         """
         if not use_lineage_processes:
-            return None
-            
-        try:
-            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
-            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
-            
-            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
-            aspect_type = "projects/dataplex-types/locations/global/aspectTypes/process_lineage"
-            aspect_types = [aspect_type]
+            return []
 
-            request = dataplex_v1.GetEntryRequest(
-                name=entry_name,
-                view=dataplex_v1.EntryView.CUSTOM,
-                aspect_types=aspect_types
+        try:
+            bq_process_sql = []
+            lineage_client = self._client._cloud_clients[constants["CLIENTS"]["DATA_CATALOG_LINEAGE"]]
+            target = datacatalog_lineage_v1.EntityReference()
+            target.fully_qualified_name = f"bigquery:{table_fqn}"
+            dataset_location = self._get_dataset_location(table_fqn)
+
+            logger.info(f"Searching for lineage links targeting table {table_fqn} in location {dataset_location}")
+            request = datacatalog_lineage_v1.SearchLinksRequest(
+                parent=f"projects/{self._client._project_id}/locations/{dataset_location}",
+                target=target,
             )
-            
-            entry = client.get_entry(request=request)
-            for aspect_key, aspect in entry.aspects.items():
-                if aspect_key.endswith("global.process_lineage") and aspect.path == "":
-                    return dict(aspect.data)
-            return None
-            
+
+            try:
+                link_results = lineage_client.search_links(request=request)
+            except google.api_core.exceptions.NotFound:
+                 logger.warning(f"No lineage links found for table {table_fqn} in location {dataset_location}")
+                 return []
+            except Exception as e:
+                logger.error(f"Cannot find lineage links for table {table_fqn}: {e}")
+                return [] # Return empty list on error
+
+            # Ensure link_results.links exists and is iterable
+            links = [link.name for link in link_results] # Access links via the response object directly
+
+            if links:
+                logger.info(f"Found {len(links)} lineage links for {table_fqn}. Searching for processes.")
+                # Batch search for processes linked to the found links
+                process_links = lineage_client.batch_search_link_processes(
+                    request=datacatalog_lineage_v1.BatchSearchLinkProcessesRequest(
+                        parent=f"projects/{self._client._project_id}/locations/{dataset_location}",
+                        links=links,
+                    )
+                )
+                
+                lineage_processes_ids = [process.process for process in process_links]
+                logger.info(f"Found {len(lineage_processes_ids)} associated processes.")
+
+                for process_id in lineage_processes_ids:
+                    try:
+                        process_details = lineage_client.get_process(
+                            request=datacatalog_lineage_v1.GetProcessRequest(
+                                name=process_id,
+                            )
+                        )
+                        # Check if 'attributes' exists and contains 'bigquery_job_id'
+                        if hasattr(process_details, 'attributes') and "bigquery_job_id" in process_details.attributes:
+                            bq_job_id = process_details.attributes["bigquery_job_id"]
+                            logger.info(f"Found BigQuery Job ID {bq_job_id} for process {process_id}")
+                            # Assumes a helper method exists on BigQueryOperations
+                            job_query = self._client._bigquery_ops.get_job_query(bq_job_id, dataset_location)
+                            if job_query:
+                                bq_process_sql.append(job_query)
+                        else:
+                            logger.debug(f"Process {process_id} does not have a 'bigquery_job_id' attribute.")
+                    except Exception as e:
+                         logger.error(f"Error getting details for process {process_id}: {e}")
+
+                # Check if the option should be disabled if no info was found
+                if not bq_process_sql:
+                    logger.warning(f"No BigQuery job source info found for {table_fqn}, disabling option for subsequent prompts if applicable.")
+                    # Consider if self._client._client_options._use_lineage_processes = False is needed here
+                return bq_process_sql
+            else:
+                logger.info(f"No lineage links found connecting to table {table_fqn}.")
+                # Consider if self._client._client_options._use_lineage_processes = False is needed here
+                return []
         except Exception as e:
-            logger.error(f"Error getting job sources for {table_fqn}: {e}")
-            return None 
+            logger.error(f"Exception getting job sources for {table_fqn}: {e}")
+            return [] # Return empty list on error
 
     def mark_table_for_regeneration(self, table_fqn: str) -> bool:
         """Marks a table for regeneration by setting the to-be-regenerated flag in its metadata.
@@ -942,7 +1035,7 @@ class DataplexOperations:
 
             # Create new entry with updated aspect
             new_entry = dataplex_v1.Entry()
-            new_entry.name = entry_name
+            new_entry.name = entry.name
             new_entry.aspects[aspect_name] = new_aspect
 
             # Update entry
@@ -1024,7 +1117,7 @@ class DataplexOperations:
 
             # Create new entry with updated aspect
             new_entry = dataplex_v1.Entry()
-            new_entry.name = entry_name
+            new_entry.name = entry.name
             new_entry.aspects[aspect_name] = new_aspect
 
             # Update entry
