@@ -21,9 +21,17 @@ import pkgutil
 import datetime
 import uuid
 import traceback
+import json
+import re
 
 # Cloud imports
 from google.cloud import dataplex_v1
+from google.cloud.dataplex_v1 import (
+    GetDataScanRequest,
+    ListDataScanJobsRequest,
+    GetDataScanJobRequest,
+)
+from google.cloud.dataplex_v1.types.datascans import DataScanJob
 from google.protobuf import field_mask_pb2, struct_pb2, json_format
 import google.api_core.exceptions
 from google.cloud import datacatalog_lineage_v1
@@ -733,79 +741,204 @@ class DataplexOperations:
         finally:
              logger.info(f"=== END: accept_column_draft_description for {table_fqn}.{column_name} ===")
 
-    def get_table_quality(self, use_data_quality, table_fqn):
-        """Gets the quality information for a table from Dataplex.
+    def _construct_bq_resource_string(self, table_fqn):
+        """Constructs a BigQuery resource string for use in API calls.
 
         Args:
-            use_data_quality (bool): Whether to use data quality information
             table_fqn (str): The fully qualified name of the table
+                (e.g., 'project.dataset.table')
 
         Returns:
-            dict: Table quality information or None if not available/enabled
+            str: The constructed resource string in the format
+                '//bigquery.googleapis.com/projects/{project}/datasets/{dataset}/tables/{table}'
+
+        Raises:
+            Exception: If there is an error constructing the resource string
         """
-        if not use_data_quality:
-            return None
-            
         try:
-            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
+            # Assumes _split_table_fqn is available via self._client._utils
             project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
-            
-            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
-            aspect_type = "projects/dataplex-types/locations/global/aspectTypes/data_quality"
-            aspect_types = [aspect_type]
-
-            request = dataplex_v1.GetEntryRequest(
-                name=entry_name,
-                view=dataplex_v1.EntryView.CUSTOM,
-                aspect_types=aspect_types
-            )
-            
-            entry = client.get_entry(request=request)
-            for aspect_key, aspect in entry.aspects.items():
-                if aspect_key.endswith("global.data_quality") and aspect.path == "":
-                    return dict(aspect.data)
-            return None
-            
+            return f"//bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
         except Exception as e:
-            logger.error(f"Error getting table quality for {table_fqn}: {e}")
-            return None
+            logger.error(f"Exception constructing BQ resource string: {e}.")
+            raise e
 
-    def get_table_profile(self, use_profile, table_fqn):
-        """Gets the profile information for a table from Dataplex.
+    def _get_table_scan_reference(self, table_fqn):
+        """Retrieves data scan references for a BigQuery table.
 
         Args:
-            use_profile (bool): Whether to use profile information
             table_fqn (str): The fully qualified name of the table
+                (e.g., 'project.dataset.table')
 
         Returns:
-            dict: Table profile information or None if not available/enabled
-        """
-        if not use_profile:
-            return None
-            
-        try:
-            client = self._client._cloud_clients[constants["CLIENTS"]["DATAPLEX_CATALOG"]]
-            project_id, dataset_id, table_id = self._client._utils.split_table_fqn(table_fqn)
-            
-            entry_name = f"projects/{project_id}/locations/{self._get_dataset_location(table_fqn)}/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}"
-            aspect_type = "projects/dataplex-types/locations/global/aspectTypes/data_profile"
-            aspect_types = [aspect_type]
+            list: List of scan reference names associated with the table
 
-            request = dataplex_v1.GetEntryRequest(
-                name=entry_name,
-                view=dataplex_v1.EntryView.CUSTOM,
-                aspect_types=aspect_types
-            )
+        Raises:
+            Exception: If there is an error retrieving scan references
+        """
+        try:
+            # Assumes DATAPLEX_DATA_SCAN client is available
+            scan_client = self._client._cloud_clients.get(constants["CLIENTS"]["DATAPLEX_DATA_SCAN"])
+            if not scan_client:
+                 logger.error("Dataplex Data Scan client not initialized.")
+                 return []
+                 
+            logger.info(f"Getting table scan reference for table:{table_fqn}.")
+
+            # Get the dataset location
+            dataset_location = self._get_dataset_location(table_fqn)
+            if not dataset_location:
+                logger.warning(f"Could not determine dataset location for table {table_fqn}, using default location from constants if available.")
+                # Fallback or raise error depending on desired behavior
+                dataset_location = constants.get("DEFAULT_LOCATION", "global") # Example fallback
+            dataplex_location = self._client._dataplex_location
+            parent_resource=f"projects/{self._client._project_id}/locations/{dataplex_location}"
+            logger.info(f"Listing data scans in parent: {parent_resource}")
             
-            entry = client.get_entry(request=request)
-            for aspect_key, aspect in entry.aspects.items():
-                if aspect_key.endswith("global.data_profile") and aspect.path == "":
-                    return dict(aspect.data)
-            return None
-            
+            # Ensure the parent exists or handle potential errors during list_data_scans
+            try:
+                 data_scans = scan_client.list_data_scans(
+                     parent=parent_resource
+                 )
+            except google.api_core.exceptions.NotFound:
+                 logger.warning(f"Parent resource for data scans not found: {parent_resource}")
+                 return []
+            except Exception as e:
+                 logger.error(f"Error listing data scans in {parent_resource}: {e}")
+                 raise e # Re-raise other exceptions
+
+            bq_resource_string = self._construct_bq_resource_string(table_fqn)
+            logger.info(f"Looking for scans matching resource: {bq_resource_string}")
+            scan_references = []
+            count = 0
+            for scan in data_scans:
+                count += 1
+                if hasattr(scan, 'data') and hasattr(scan.data, 'resource') and scan.data.resource == bq_resource_string:
+                    logger.info(f"Found matching scan: {scan.name}")
+                    scan_references.append(scan.name)
+            logger.info(f"Checked {count} scans. Found {len(scan_references)} matching references.")
+            return scan_references
         except Exception as e:
-            logger.error(f"Error getting table profile for {table_fqn}: {e}")
-            return None
+            logger.error(f"Exception getting table scan reference: {e}.")
+            # Return empty list instead of raising exception to allow the process to continue
+            return []
+
+    def get_table_profile(self, use_enabled, table_fqn):
+        """Retrieves the profile information for a BigQuery table.
+
+        Args:
+            use_enabled (bool): Whether profile retrieval is enabled
+            table_fqn (str): The fully qualified name of the table
+                (e.g., 'project.dataset.table')
+
+        Returns:
+            list: Table profile results, or empty list if disabled/not available
+
+        Raises:
+            Exception: If there is an error retrieving the table profile
+        """
+        try:
+            table_profile = self.get_table_profile_quality(use_enabled, table_fqn)["data_profile"]
+            if not table_profile:
+                logger.info(f"No profile found for table in datascans{table_fqn}.")
+                #self._client_options._use_profile = False
+            return table_profile
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def get_table_quality(self, use_enabled, table_fqn):
+        """Retrieves the data quality information for a BigQuery table.
+
+        Args:
+            use_enabled (bool): Whether quality check retrieval is enabled
+            table_fqn (str): The fully qualified name of the table
+                (e.g., 'project.dataset.table')
+
+        Returns:
+            list: Data quality results, or empty list if disabled/not available
+
+        Raises:
+            Exception: If there is an error retrieving quality information
+        """
+        try:
+            table_quality = self.get_table_profile_quality(use_enabled, table_fqn)["data_quality"]
+            # If the user is requesting to use data quality but there is
+            # not data quality information to return, we disable the client
+            # options flag so the prompt do not include this.
+            if not table_quality:
+                logger.info(f"No quality check found for table in datascans{table_fqn}.")
+                #self._client_options._use_data_quality = False
+            return table_quality
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
+
+    def get_table_profile_quality(self, use_enabled, table_fqn):
+        """Retrieves both profile and quality information for a BigQuery table.
+
+        Args:
+            use_enabled (bool): Whether profile/quality retrieval is enabled
+            table_fqn (str): The fully qualified name of the table
+                (e.g., 'project.dataset.table')
+
+        Returns:
+            dict: Dictionary containing:
+                - data_profile (list): Profile results
+                - data_quality (list): Quality results
+                Both will be empty lists if disabled/not available
+
+        Raises:
+            Exception: If there is an error retrieving the information
+        """
+        try:
+            if use_enabled:
+                scan_client = self._client._cloud_clients[
+                    constants["CLIENTS"]["DATAPLEX_DATA_SCAN"]
+                ]
+                data_profile_results = []
+                data_quality_results = []
+                table_scan_references = self._get_table_scan_reference(table_fqn)
+                for table_scan_reference in table_scan_references:
+                    if table_scan_reference:
+                        for job in scan_client.list_data_scan_jobs(
+                            ListDataScanJobsRequest(
+                                parent=scan_client.get_data_scan(
+                                    GetDataScanRequest(name=table_scan_reference)
+                                ).name
+                            )
+                        ):
+                            job_result = scan_client.get_data_scan_job(
+                                request=GetDataScanJobRequest(
+                                    name=job.name, view="FULL"
+                                )
+                            )
+                            if job_result.state == DataScanJob.State.SUCCEEDED:
+                                job_result_json = json.loads(
+                                    dataplex_v1.types.datascans.DataScanJob.to_json(
+                                        job_result
+                                    )
+                                )
+                                if "dataQualityResult" in job_result_json:
+                                    data_quality_results.append(
+                                        job_result_json["dataQualityResult"]
+                                    )
+                                if "dataProfileResult" in job_result_json:
+                                    data_profile_results.append(
+                                        job_result_json["dataProfileResult"]
+                                    )
+                return {
+                    "data_profile": data_profile_results,
+                    "data_quality": data_quality_results,
+                }
+            else:
+                return {
+                    "data_profile": [],
+                    "data_quality": [],
+                }
+        except Exception as e:
+            logger.error(f"Exception: {e}.")
+            raise e
 
     def get_table_sources_info(self, use_lineage_tables, table_fqn):
         """Gets source table information using Data Catalog Lineage API.
