@@ -53,12 +53,15 @@ def _call_api(
     top_values_in_description,
     description_handling="APPEND",
     description_prefix="",
+    regeneration_filter="",
+    table_fqn="",
+    column_name="",
 ):
     """Call the metadata wizard API with the provided parameters.
 
     Args:
         service (str): The API service endpoint
-        scope (str): The scope of the operation (table, columns, dataset, dataset_columns)
+        scope (str): The scope of the operation (table, columns, dataset, dataset_columns, regenerate_all, regenerate_selected, get_regeneration_counts, mark_for_regeneration)
         use_lineage_tables (bool): Whether to use lineage tables
         use_lineage_processes (bool): Whether to use lineage processes
         use_profile (bool): Whether to use profile information
@@ -79,6 +82,9 @@ def _call_api(
         top_values_in_description (bool): Whether to include top values in description
         description_handling (str): How to handle description updates
         description_prefix (str): Prefix for generated descriptions
+        regeneration_filter (str): Filter pattern for selective regeneration
+        table_fqn (str): Fully qualified table name for marking regeneration
+        column_name (str): Column name for marking specific column for regeneration
     """
     API_URL = f"https://{service}"
     API_URL_DEBUG = "http://localhost:8000"
@@ -86,6 +92,10 @@ def _call_api(
     METADATA_COLUMNS_SCOPE_ROUTE = "/generate_columns_descriptions"
     METADATA_DATASET_SCOPE_ROUTE = "/generate_dataset_tables_descriptions"
     METADATA_DATASET_COLUMNS_SCOPE_ROUTE = "/generate_dataset_tables_columns_descriptions"
+    REGENERATE_ALL_ROUTE = "/regenerate_all"
+    REGENERATE_SELECTED_ROUTE = "/regenerate_selected"
+    GET_REGENERATION_COUNTS_ROUTE = "/get_regeneration_counts"
+    MARK_FOR_REGENERATION_ROUTE = "/mark_for_regeneration"
 
     if debug:
         API_URL = API_URL_DEBUG
@@ -98,40 +108,111 @@ def _call_api(
         url = API_URL + METADATA_DATASET_SCOPE_ROUTE
     elif scope == "dataset_columns":
         url = API_URL + METADATA_DATASET_COLUMNS_SCOPE_ROUTE
+    elif scope == "regenerate_all":
+        url = API_URL + REGENERATE_ALL_ROUTE
+    elif scope == "regenerate_selected":
+        url = API_URL + REGENERATE_SELECTED_ROUTE
+    elif scope == "get_regeneration_counts":
+        url = API_URL + GET_REGENERATION_COUNTS_ROUTE
+    elif scope == "mark_for_regeneration":
+        url = API_URL + MARK_FOR_REGENERATION_ROUTE
     else:
         raise ValueError(f"Invalid scope: {scope}")
 
-    params = {
-        "client_options_settings": {
-            "use_lineage_tables": use_lineage_tables,
-            "use_lineage_processes": use_lineage_processes,
-            "use_profile": use_profile,
-            "use_data_quality": use_data_quality,
-            "use_ext_documents": use_ext_documents,
-            "persist_to_dataplex_catalog": persist_to_dataplex_catalog,
-            "stage_for_review": stage_for_review,
-            "top_values_in_description": top_values_in_description,
-            "description_handling": description_handling,
-            "description_prefix": description_prefix
-        },
-        "client_settings": {
-            "project_id": dataplex_project_id,
-            "llm_location": llm_location,
-            "dataplex_location": dataplex_location
-        },
-        "table_settings": {
-            "project_id": table_project_id,
-            "dataset_id": table_dataset_id,
-            "table_id": table_id,
-            "documentation_uri": documentation_uri
-        },
-        "dataset_settings": {
-            "project_id": table_project_id,
-            "dataset_id": table_dataset_id,
-            "documentation_csv_uri": documentation_csv_uri,
-            "strategy": strategy
-        },
-    }
+    # Build parameters based on scope
+    if scope in ["regenerate_all", "regenerate_selected"]:
+        params = {
+            "client_options_settings": {
+                "use_lineage_tables": use_lineage_tables,
+                "use_lineage_processes": use_lineage_processes,
+                "use_profile": use_profile,
+                "use_data_quality": use_data_quality,
+                "use_ext_documents": use_ext_documents,
+                "persist_to_dataplex_catalog": persist_to_dataplex_catalog,
+                "stage_for_review": stage_for_review,
+                "top_values_in_description": top_values_in_description,
+                "description_handling": description_handling,
+                "description_prefix": description_prefix
+            },
+            "client_settings": {
+                "project_id": dataplex_project_id,
+                "llm_location": llm_location,
+                "dataplex_location": dataplex_location
+            },
+            "dataset_settings": {
+                "project_id": table_project_id,
+                "dataset_id": table_dataset_id,
+                "documentation_csv_uri": documentation_csv_uri,
+                "strategy": strategy
+            }
+        }
+        
+        if scope == "regenerate_selected":
+            params["regeneration_request"] = {
+                "objects": [regeneration_filter] if regeneration_filter else []
+            }
+    
+    elif scope == "get_regeneration_counts":
+        params = {
+            "client_settings": {
+                "project_id": dataplex_project_id,
+                "llm_location": llm_location,
+                "dataplex_location": dataplex_location
+            },
+            "dataset_settings": {
+                "project_id": table_project_id,
+                "dataset_id": table_dataset_id,
+                "documentation_csv_uri": documentation_csv_uri,
+                "strategy": strategy
+            }
+        }
+    
+    elif scope == "mark_for_regeneration":
+        params = {
+            "client_settings": {
+                "project_id": dataplex_project_id,
+                "llm_location": llm_location,
+                "dataplex_location": dataplex_location
+            },
+            "request": {
+                "table_fqn": table_fqn,
+                "column_name": column_name if column_name else None
+            }
+        }
+    
+    else:
+        # Original parameter structure for existing scopes
+        params = {
+            "client_options_settings": {
+                "use_lineage_tables": use_lineage_tables,
+                "use_lineage_processes": use_lineage_processes,
+                "use_profile": use_profile,
+                "use_data_quality": use_data_quality,
+                "use_ext_documents": use_ext_documents,
+                "persist_to_dataplex_catalog": persist_to_dataplex_catalog,
+                "stage_for_review": stage_for_review,
+                "top_values_in_description": top_values_in_description,
+                "description_handling": description_handling,
+                "description_prefix": description_prefix
+            },
+            "client_settings": {
+                "project_id": dataplex_project_id,
+                "llm_location": llm_location,
+                "dataplex_location": dataplex_location
+            },
+            "table_settings": {
+                "project_id": table_project_id,
+                "dataset_id": table_dataset_id,
+                "table_id": table_id,
+                "documentation_uri": documentation_uri
+            },
+            "dataset_settings": {
+                "project_id": table_project_id,
+                "dataset_id": table_dataset_id,
+                "documentation_csv_uri": documentation_csv_uri,
+                "strategy": strategy
+            },
+        }
 
     try:
         logger.debug("Sending request with params: %s", params)
@@ -160,7 +241,7 @@ def _get_input_arguments():
     parser.add_argument("--service", dest="service", required=True, type=str,
                        help="The API service endpoint")
     parser.add_argument("--scope", dest="scope", required=True, type=str,
-                       help="The scope of the operation (table, columns, dataset, dataset_columns)")
+                       help="The scope of the operation (table, columns, dataset, dataset_columns, regenerate_all, regenerate_selected, get_regeneration_counts, mark_for_regeneration)")
     parser.add_argument("--dataplex_project_id", dest="dataplex_project_id", required=True, type=str,
                        help="The Dataplex project ID")
     parser.add_argument("--llm_location", dest="llm_location", required=True, type=str,
@@ -171,8 +252,8 @@ def _get_input_arguments():
                        help="The table project ID")
     parser.add_argument("--table_dataset_id", dest="table_dataset_id", required=True, type=str,
                        help="The table dataset ID")
-    parser.add_argument("--table_id", dest="table_id", required=True, type=str,
-                       help="The table ID")
+    parser.add_argument("--table_id", dest="table_id", required=False, type=str, default="",
+                       help="The table ID (required for table and columns scopes)")
 
     # Optional arguments with defaults
     parser.add_argument("--use_lineage_tables", dest="use_lineage_tables", required=False, default=False, type=bool,
@@ -203,8 +284,23 @@ def _get_input_arguments():
                        help="How to handle description updates")
     parser.add_argument("--description_prefix", dest="description_prefix", required=False, type=str, default="",
                        help="Prefix for generated descriptions")
+    parser.add_argument("--regeneration_filter", dest="regeneration_filter", required=False, type=str, default="",
+                       help="Filter pattern for selective regeneration")
+    parser.add_argument("--table_fqn", dest="table_fqn", required=False, type=str, default="",
+                       help="Fully qualified table name for marking regeneration")
+    parser.add_argument("--column_name", dest="column_name", required=False, type=str, default="",
+                       help="Column name for marking specific column for regeneration")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    # Validate scope-specific requirements
+    if args.scope in ["table", "columns"] and not args.table_id:
+        parser.error(f"--table_id is required for scope '{args.scope}'")
+    
+    if args.scope == "mark_for_regeneration" and not args.table_fqn:
+        parser.error(f"--table_fqn is required for scope '{args.scope}'")
+    
+    return args
 
 
 def main():
@@ -233,6 +329,9 @@ def main():
         top_values_in_description=args.top_values_in_description,
         description_handling=args.description_handling,
         description_prefix=args.description_prefix,
+        regeneration_filter=args.regeneration_filter,
+        table_fqn=args.table_fqn,
+        column_name=args.column_name,
     )
 
 
